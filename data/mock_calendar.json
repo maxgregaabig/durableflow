@@ -1,0 +1,83 @@
+[
+  {
+    "id": "cal-001",
+    "title": "Board meeting prep with Sarah",
+    "start": "2026-06-19T14:00:00Z",
+    "end": "2026-06-19T15:00:00Z",
+    "attendees": ["sarah.chen@acme.com", "user@company.com"],
+    "description": "Review Q3 deck before Thursday board meeting"
+  },
+  {
+    "id": "cal-002",
+    "title": "Assistant reliability review",
+    "start": "2026-06-18T17:00:00Z",
+    "end": "2026-06-18T18:00:00Z",
+    "attendees": ["mira@company.com", "user@company.com"],
+    "description": "Discuss crash recovery, checkpoints, and idempotent sends"
+  },
+  {
+    "id": "cal-003",
+    "title": "Provider cost planning",
+    "start": "2026-06-18T20:00:00Z",
+    "end": "2026-06-18T20:30:00Z",
+    "attendees": ["finance@company.com", "user@company.com"],
+    "description": "Review model cost projections and routing policy"
+  },
+  {
+    "id": "cal-004",
+    "title": "Backend systems interview",
+    "start": "2026-06-18T16:00:00Z",
+    "end": "2026-06-18T17:00:00Z",
+    "attendees": ["recruiting@company.com", "user@company.com"],
+    "description": "Interview candidate on durable execution patterns"
+  },
+  {
+    "id": "cal-005",
+    "title": "Launch readiness",
+    "start": "2026-06-20T18:00:00Z",
+    "end": "2026-06-20T19:00:00Z",
+    "attendees": ["pm@company.com", "infra@company.com", "user@company.com"],
+    "description": "Review approval queue, telemetry, and failure handling"
+  },
+  {
+    "id": "cal-006",
+    "title": "Customer escalation review",
+    "start": "2026-06-17T21:00:00Z",
+    "end": "2026-06-17T21:30:00Z",
+    "attendees": ["support@company.com", "user@company.com"],
+    "description": "Discuss duplicate send report and idempotency fix"
+  },
+  {
+    "id": "cal-007",
+    "title": "Security sync",
+    "start": "2026-06-21T18:00:00Z",
+    "end": "2026-06-21T18:30:00Z",
+    "attendees": ["security@company.com", "user@company.com"],
+    "description": "Secrets rotation and telemetry redaction"
+  },
+  {
+    "id": "cal-008",
+    "title": "Architecture writing block",
+    "start": "2026-06-22T15:00:00Z",
+    "end": "2026-06-22T17:00:00Z",
+    "attendees": ["user@company.com"],
+    "description": "Write README notes on assistant workflow infrastructure"
+  },
+  {
+    "id": "cal-009",
+    "title": "AI systems roundtable",
+    "start": "2026-06-23T19:00:00Z",
+    "end": "2026-06-23T20:00:00Z",
+    "attendees": ["events@company.com", "user@company.com"],
+    "description": "Panel on reliable AI workflow systems"
+  },
+  {
+    "id": "cal-010",
+    "title": "Weekly team status",
+    "start": "2026-06-24T16:00:00Z",
+    "end": "2026-06-24T16:30:00Z",
+    "attendees": ["team@company.com", "user@company.com"],
+    "description": "Routine team status and launch updates"
+  }
+]
+

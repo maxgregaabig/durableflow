@@ -1,0 +1,503 @@
+[
+  {
+    "id": "email-001",
+    "from": "sarah.chen@acme.com",
+    "to": "user@company.com",
+    "subject": "Q3 board deck review -- need feedback by Thursday",
+    "body": "Hi Marcos, attached is the Q3 board deck. Can you review the AI infrastructure section and send feedback before Thursday afternoon?",
+    "timestamp": "2026-06-17T09:14:00Z",
+    "labels": ["inbox", "important"],
+    "thread_id": "thread-042"
+  },
+  {
+    "id": "email-002",
+    "from": "mira@company.com",
+    "to": "user@company.com",
+    "subject": "Durable workflow notes from Monday",
+    "body": "Sharing notes from Monday's discussion on checkpointing, retries, and approval gates for assistant workflows.",
+    "timestamp": "2026-06-16T16:30:00Z",
+    "labels": ["inbox"],
+    "thread_id": "thread-041"
+  },
+  {
+    "id": "email-003",
+    "from": "calendar@company.com",
+    "to": "user@company.com",
+    "subject": "Reminder: Board meeting prep with Sarah",
+    "body": "This is a reminder for the board meeting prep session with Sarah Chen on Friday.",
+    "timestamp": "2026-06-16T12:00:00Z",
+    "labels": ["calendar"],
+    "thread_id": "thread-040"
+  },
+  {
+    "id": "email-004",
+    "from": "infra-alerts@company.com",
+    "to": "user@company.com",
+    "subject": "Staging worker restart completed",
+    "body": "The staging worker pool restarted after the deploy and all health checks are green.",
+    "timestamp": "2026-06-15T18:22:00Z",
+    "labels": ["alerts"],
+    "thread_id": "thread-039"
+  },
+  {
+    "id": "email-005",
+    "from": "devrel@company.com",
+    "to": "user@company.com",
+    "subject": "Draft blog post on agent reliability",
+    "body": "Could you review the draft post on durable agent workflows, human approval, and idempotent side effects?",
+    "timestamp": "2026-06-15T14:11:00Z",
+    "labels": ["inbox"],
+    "thread_id": "thread-038"
+  },
+  {
+    "id": "email-006",
+    "from": "finance@company.com",
+    "to": "user@company.com",
+    "subject": "May AI provider spend",
+    "body": "Attached is the May model provider spend report with token usage broken down by workflow and model.",
+    "timestamp": "2026-06-14T10:05:00Z",
+    "labels": ["finance"],
+    "thread_id": "thread-037"
+  },
+  {
+    "id": "email-007",
+    "from": "recruiting@company.com",
+    "to": "user@company.com",
+    "subject": "Candidate packet for backend systems interview",
+    "body": "Please review the packet before tomorrow's interview loop for the backend systems candidate.",
+    "timestamp": "2026-06-13T11:43:00Z",
+    "labels": ["recruiting"],
+    "thread_id": "thread-036"
+  },
+  {
+    "id": "email-008",
+    "from": "product@company.com",
+    "to": "user@company.com",
+    "subject": "Assistant approval queue metrics",
+    "body": "The weekly product metrics show approval queue latency and completion rates for email assistant routines.",
+    "timestamp": "2026-06-12T15:20:00Z",
+    "labels": ["product"],
+    "thread_id": "thread-035"
+  },
+  {
+    "id": "email-009",
+    "from": "ops@company.com",
+    "to": "user@company.com",
+    "subject": "Runbook update: provider timeout handling",
+    "body": "The runbook now includes model provider timeout handling, fallback order, and telemetry fields.",
+    "timestamp": "2026-06-11T09:55:00Z",
+    "labels": ["ops"],
+    "thread_id": "thread-034"
+  },
+  {
+    "id": "email-010",
+    "from": "legal@company.com",
+    "to": "user@company.com",
+    "subject": "Vendor agreement received",
+    "body": "We received the vendor agreement. No action required until procurement completes their review.",
+    "timestamp": "2026-06-10T17:10:00Z",
+    "labels": ["legal"],
+    "thread_id": "thread-033"
+  },
+  {
+    "id": "email-011",
+    "from": "team@company.com",
+    "to": "user@company.com",
+    "subject": "Weekly status notes",
+    "body": "This week's status covers reliability work, customer escalations, and upcoming launch readiness.",
+    "timestamp": "2026-06-09T17:00:00Z",
+    "labels": ["updates"],
+    "thread_id": "thread-032"
+  },
+  {
+    "id": "email-012",
+    "from": "sarah.chen@acme.com",
+    "to": "user@company.com",
+    "subject": "Follow-up on Q3 metrics",
+    "body": "Can you confirm the model cost numbers before we finalize the board deck?",
+    "timestamp": "2026-06-08T13:45:00Z",
+    "labels": ["important"],
+    "thread_id": "thread-031"
+  },
+  {
+    "id": "email-013",
+    "from": "security@company.com",
+    "to": "user@company.com",
+    "subject": "Secrets rotation complete",
+    "body": "Production API key rotation completed successfully for all worker services.",
+    "timestamp": "2026-06-07T08:30:00Z",
+    "labels": ["security"],
+    "thread_id": "thread-030"
+  },
+  {
+    "id": "email-014",
+    "from": "support@company.com",
+    "to": "user@company.com",
+    "subject": "Customer escalation: duplicate email sends",
+    "body": "A customer reported duplicate sends after a retry. We need to review idempotency behavior.",
+    "timestamp": "2026-06-06T19:21:00Z",
+    "labels": ["support", "important"],
+    "thread_id": "thread-029"
+  },
+  {
+    "id": "email-015",
+    "from": "data@company.com",
+    "to": "user@company.com",
+    "subject": "Context retrieval evaluation set",
+    "body": "The new retrieval evaluation set includes email and calendar examples for token budget testing.",
+    "timestamp": "2026-06-05T15:00:00Z",
+    "labels": ["data"],
+    "thread_id": "thread-028"
+  },
+  {
+    "id": "email-016",
+    "from": "noreply@github.com",
+    "to": "user@company.com",
+    "subject": "PR #1842 merged",
+    "body": "The checkpoint compaction PR was merged into main.",
+    "timestamp": "2026-06-04T22:18:00Z",
+    "labels": ["github"],
+    "thread_id": "thread-027"
+  },
+  {
+    "id": "email-017",
+    "from": "office@company.com",
+    "to": "user@company.com",
+    "subject": "Office closed Friday afternoon",
+    "body": "The office will close Friday afternoon for facilities work.",
+    "timestamp": "2026-06-04T10:25:00Z",
+    "labels": ["admin"],
+    "thread_id": "thread-026"
+  },
+  {
+    "id": "email-018",
+    "from": "pm@company.com",
+    "to": "user@company.com",
+    "subject": "Launch checklist approval",
+    "body": "Please approve the launch checklist after you verify workflow recovery and email send guards.",
+    "timestamp": "2026-06-03T16:40:00Z",
+    "labels": ["product", "important"],
+    "thread_id": "thread-025"
+  },
+  {
+    "id": "email-019",
+    "from": "infra@company.com",
+    "to": "user@company.com",
+    "subject": "SQLite WAL mode observations",
+    "body": "WAL mode reduced lock contention in the local workflow runtime benchmark.",
+    "timestamp": "2026-06-02T12:10:00Z",
+    "labels": ["infra"],
+    "thread_id": "thread-024"
+  },
+  {
+    "id": "email-020",
+    "from": "sales@company.com",
+    "to": "user@company.com",
+    "subject": "Prospect asking about assistant reliability",
+    "body": "A prospect asked how our assistant handles crashes, retries, approvals, and duplicate actions.",
+    "timestamp": "2026-06-01T09:35:00Z",
+    "labels": ["sales"],
+    "thread_id": "thread-023"
+  },
+  {
+    "id": "email-021",
+    "from": "alerts@company.com",
+    "to": "user@company.com",
+    "subject": "Daily backup complete",
+    "body": "SQLite backup completed for the workflow demo environment.",
+    "timestamp": "2026-05-31T06:00:00Z",
+    "labels": ["alerts"],
+    "thread_id": "thread-022"
+  },
+  {
+    "id": "email-022",
+    "from": "analytics@company.com",
+    "to": "user@company.com",
+    "subject": "Inference latency dashboard",
+    "body": "The dashboard now breaks out p50 and p95 latency by provider and workflow step.",
+    "timestamp": "2026-05-30T14:50:00Z",
+    "labels": ["analytics"],
+    "thread_id": "thread-021"
+  },
+  {
+    "id": "email-023",
+    "from": "mira@company.com",
+    "to": "user@company.com",
+    "subject": "Approval copy edits",
+    "body": "I left comments on the approval prompt copy for assistant-drafted replies.",
+    "timestamp": "2026-05-29T11:15:00Z",
+    "labels": ["inbox"],
+    "thread_id": "thread-020"
+  },
+  {
+    "id": "email-024",
+    "from": "buildkite@company.com",
+    "to": "user@company.com",
+    "subject": "Main branch green",
+    "body": "All tests passed on main after the telemetry cleanup.",
+    "timestamp": "2026-05-28T20:08:00Z",
+    "labels": ["ci"],
+    "thread_id": "thread-019"
+  },
+  {
+    "id": "email-025",
+    "from": "docs@company.com",
+    "to": "user@company.com",
+    "subject": "README architecture pass",
+    "body": "The README architecture section needs a shorter explanation of durable execution.",
+    "timestamp": "2026-05-27T13:25:00Z",
+    "labels": ["docs"],
+    "thread_id": "thread-018"
+  },
+  {
+    "id": "email-026",
+    "from": "finance@company.com",
+    "to": "user@company.com",
+    "subject": "Budget owner approval needed",
+    "body": "Please approve the updated AI provider budget by end of day.",
+    "timestamp": "2026-05-26T09:05:00Z",
+    "labels": ["finance", "important"],
+    "thread_id": "thread-017"
+  },
+  {
+    "id": "email-027",
+    "from": "security@company.com",
+    "to": "user@company.com",
+    "subject": "Data retention policy reminder",
+    "body": "Reminder: telemetry logs must not include secrets or raw credential values.",
+    "timestamp": "2026-05-25T10:00:00Z",
+    "labels": ["security"],
+    "thread_id": "thread-016"
+  },
+  {
+    "id": "email-028",
+    "from": "infra@company.com",
+    "to": "user@company.com",
+    "subject": "Worker crash reproduction",
+    "body": "We can now reproduce the worker crash by terminating the subprocess during an LLM call.",
+    "timestamp": "2026-05-24T18:45:00Z",
+    "labels": ["infra"],
+    "thread_id": "thread-015"
+  },
+  {
+    "id": "email-029",
+    "from": "events@company.com",
+    "to": "user@company.com",
+    "subject": "AI systems roundtable invite",
+    "body": "You're invited to a roundtable on reliable AI systems and operational patterns.",
+    "timestamp": "2026-05-23T12:30:00Z",
+    "labels": ["events"],
+    "thread_id": "thread-014"
+  },
+  {
+    "id": "email-030",
+    "from": "support@company.com",
+    "to": "user@company.com",
+    "subject": "Feature request: approval history",
+    "body": "Several users asked for a history view showing who approved each assistant action.",
+    "timestamp": "2026-05-22T16:12:00Z",
+    "labels": ["support"],
+    "thread_id": "thread-013"
+  },
+  {
+    "id": "email-031",
+    "from": "partner@vendor.com",
+    "to": "user@company.com",
+    "subject": "Model pricing update",
+    "body": "We're updating token pricing next month. Let us know if you need revised estimates.",
+    "timestamp": "2026-05-21T08:55:00Z",
+    "labels": ["vendor"],
+    "thread_id": "thread-012"
+  },
+  {
+    "id": "email-032",
+    "from": "engineering@company.com",
+    "to": "user@company.com",
+    "subject": "Retry policy proposal",
+    "body": "The proposal recommends one retry before provider fallback for long-running assistant steps.",
+    "timestamp": "2026-05-20T15:18:00Z",
+    "labels": ["engineering"],
+    "thread_id": "thread-011"
+  },
+  {
+    "id": "email-033",
+    "from": "mira@company.com",
+    "to": "user@company.com",
+    "subject": "Context window regression",
+    "body": "The latest experiment shows irrelevant calendar events crowding out useful prior emails.",
+    "timestamp": "2026-05-19T11:44:00Z",
+    "labels": ["data"],
+    "thread_id": "thread-010"
+  },
+  {
+    "id": "email-034",
+    "from": "pm@company.com",
+    "to": "user@company.com",
+    "subject": "Can you reply to Sarah?",
+    "body": "Sarah is asking about the board deck and needs a clear owner for feedback.",
+    "timestamp": "2026-05-18T10:05:00Z",
+    "labels": ["product", "important"],
+    "thread_id": "thread-009"
+  },
+  {
+    "id": "email-035",
+    "from": "ops@company.com",
+    "to": "user@company.com",
+    "subject": "Weekend maintenance complete",
+    "body": "Maintenance completed without incidents. No action is needed.",
+    "timestamp": "2026-05-17T07:40:00Z",
+    "labels": ["ops"],
+    "thread_id": "thread-008"
+  },
+  {
+    "id": "email-036",
+    "from": "analytics@company.com",
+    "to": "user@company.com",
+    "subject": "Workflow cost anomaly",
+    "body": "One assistant routine generated unusually high token usage during context selection.",
+    "timestamp": "2026-05-16T14:30:00Z",
+    "labels": ["analytics"],
+    "thread_id": "thread-007"
+  },
+  {
+    "id": "email-037",
+    "from": "security@company.com",
+    "to": "user@company.com",
+    "subject": "Approval required for production access",
+    "body": "Please approve production access for the new on-call engineer.",
+    "timestamp": "2026-05-15T09:50:00Z",
+    "labels": ["security", "important"],
+    "thread_id": "thread-006"
+  },
+  {
+    "id": "email-038",
+    "from": "docs@company.com",
+    "to": "user@company.com",
+    "subject": "Operational primitives glossary",
+    "body": "The glossary now includes checkpoints, side effects, idempotency, and approval gates.",
+    "timestamp": "2026-05-14T12:22:00Z",
+    "labels": ["docs"],
+    "thread_id": "thread-005"
+  },
+  {
+    "id": "email-039",
+    "from": "founder@startup.com",
+    "to": "user@company.com",
+    "subject": "Question about assistant workflow architecture",
+    "body": "Would love your take on how to keep assistant workflows reliable under provider failures.",
+    "timestamp": "2026-05-13T18:05:00Z",
+    "labels": ["network"],
+    "thread_id": "thread-004"
+  },
+  {
+    "id": "email-040",
+    "from": "team@company.com",
+    "to": "user@company.com",
+    "subject": "Friday demo plan",
+    "body": "Friday's demo will show crash recovery, approval, and duplicate-send prevention.",
+    "timestamp": "2026-05-12T16:16:00Z",
+    "labels": ["team"],
+    "thread_id": "thread-003"
+  },
+  {
+    "id": "email-041",
+    "from": "research@company.com",
+    "to": "user@company.com",
+    "subject": "Embedding evaluation notes",
+    "body": "Embeddings improved recall, but TF-IDF remains easier to reason about for the reference runtime.",
+    "timestamp": "2026-05-11T10:10:00Z",
+    "labels": ["research"],
+    "thread_id": "thread-002"
+  },
+  {
+    "id": "email-042",
+    "from": "noreply@linear.app",
+    "to": "user@company.com",
+    "subject": "Issue assigned: approval persistence",
+    "body": "You were assigned an issue to verify approval queue persistence across restarts.",
+    "timestamp": "2026-05-10T09:00:00Z",
+    "labels": ["issues"],
+    "thread_id": "thread-001"
+  },
+  {
+    "id": "email-043",
+    "from": "training@company.com",
+    "to": "user@company.com",
+    "subject": "Incident review training",
+    "body": "The next training session covers root cause analysis for failed background workers.",
+    "timestamp": "2026-05-09T13:35:00Z",
+    "labels": ["training"],
+    "thread_id": "thread-000"
+  },
+  {
+    "id": "email-044",
+    "from": "hr@company.com",
+    "to": "user@company.com",
+    "subject": "Benefits enrollment reminder",
+    "body": "Open enrollment closes next week. No response is required if you already submitted choices.",
+    "timestamp": "2026-05-08T08:25:00Z",
+    "labels": ["hr"],
+    "thread_id": "thread-099"
+  },
+  {
+    "id": "email-045",
+    "from": "sarah.chen@acme.com",
+    "to": "user@company.com",
+    "subject": "Board meeting agenda",
+    "body": "The agenda includes Q3 metrics, AI spend, and reliability work for the assistant platform.",
+    "timestamp": "2026-05-07T17:50:00Z",
+    "labels": ["important"],
+    "thread_id": "thread-098"
+  },
+  {
+    "id": "email-046",
+    "from": "infra-alerts@company.com",
+    "to": "user@company.com",
+    "subject": "Production deploy completed",
+    "body": "The production deploy completed and workflow workers are processing normally.",
+    "timestamp": "2026-05-06T21:05:00Z",
+    "labels": ["alerts"],
+    "thread_id": "thread-097"
+  },
+  {
+    "id": "email-047",
+    "from": "customers@company.com",
+    "to": "user@company.com",
+    "subject": "Customer asks for audit export",
+    "body": "A customer wants an export of assistant actions, approval decisions, and model calls.",
+    "timestamp": "2026-05-05T12:45:00Z",
+    "labels": ["customers"],
+    "thread_id": "thread-096"
+  },
+  {
+    "id": "email-048",
+    "from": "pm@company.com",
+    "to": "user@company.com",
+    "subject": "Need feedback on routing policy",
+    "body": "Can you review whether provider fallback should trigger on timeout, HTTP 500, or both?",
+    "timestamp": "2026-05-04T15:15:00Z",
+    "labels": ["product"],
+    "thread_id": "thread-095"
+  },
+  {
+    "id": "email-049",
+    "from": "analytics@company.com",
+    "to": "user@company.com",
+    "subject": "Weekly telemetry digest",
+    "body": "This digest summarizes workflow duration, step counts, fallbacks, and approval wait time.",
+    "timestamp": "2026-05-03T09:20:00Z",
+    "labels": ["analytics"],
+    "thread_id": "thread-094"
+  },
+  {
+    "id": "email-050",
+    "from": "office@company.com",
+    "to": "user@company.com",
+    "subject": "Lunch menu",
+    "body": "The lunch menu is posted for the week.",
+    "timestamp": "2026-05-02T11:00:00Z",
+    "labels": ["admin"],
+    "thread_id": "thread-093"
+  }
+]
+
