@@ -12,7 +12,7 @@
 
 ## 0. Positioning Note (read first)
 
-Colony is the **smaller, falsifiable** version of the "autonomous compute colony" concept. It deliberately does NOT lead with spectral coordination theory, predictive failure detection, or a multi-agent research framing. Those belong in the resume and the interview conversation, not in this artifact.
+Colony is a **falsifiable** implementation of the "autonomous compute colony" concept. It deliberately focuses on a concrete benchmark rather than theoretical or predictive failure detection concepts.
 
 The single load-bearing claim of this artifact is:
 
@@ -60,13 +60,13 @@ This is not an agent framework. It is the operational substrate that makes agent
 
 **Concrete workload for the headline benchmark:** 20 small AI-eval-style jobs over a toy retrieval/model benchmark. Each job has 5 durable stages: environment setup, shard/data load, inference/eval shard, metrics write, and artifact upload. A job is complete only after the artifact-upload stage commits. In mock mode these stages are deterministic timed work with seeded costs; in live mode the same stage shape runs on a small Vast instance and records real elapsed time and pricing.
 
-**Why this artifact, for this role:** The Vast AI Agent Researcher role centers on memory, reliability, and reasoning for general learning agents on Vast's substrate. The most credible signal for that role is not a novel theory; it is *taking the company's core business risk (instance loss under load) and making it measurable, survivable, and demonstrably better.* The artifact reuses an existing, tested durable execution engine rather than starting over, which itself signals the candidate knows the difference between a primitive and a toy.
+**Why this artifact:** It demonstrates how to take a core infrastructure risk (instance loss under load) and make it measurable, survivable, and demonstrably better. The artifact reuses an existing, tested durable execution engine rather than starting over, showing the difference between a production-minded primitive and a custom toy.
 
 ### Who
 
-**Primary persona -- the hiring evaluator (Scott / Jake archetype):** a technical founder/lead who rewards "did you identify the important idea" and asks "show me the data" before "is it polished." The benchmark table is for this reader.
+**Primary persona -- the infrastructure evaluator:** a technical lead who rewards concrete data ("show me the data") and reproducible benchmarks. The benchmark table is for this reader.
 
-**Implicit persona -- the Vast infrastructure owner:** an engineer who would consume Colony's spot-like loss survival behavior and cost accounting as a platform primitive. The architecture notes are for this reader.
+**Implicit persona -- the compute marketplace architect:** an engineer who would consume Colony's spot-like loss survival behavior and cost accounting as a platform primitive. The architecture notes are for this reader.
 
 **Operator persona -- whoever runs the demo:** launches the chaos benchmark from a CLI, watches the live scoreboard, reads the final result table.
 
@@ -579,7 +579,7 @@ T-INT-005 is a gated manual smoke test, not part of the default CI run (requires
 
 ## 7. Pre-Mortem Analysis
 
-*It is the post-interview debrief. The artifact did not land. What went wrong?*
+*It is the post-mortem review. The benchmark did not deliver. What went wrong?*
 
 | Failure Category | Risk Factor | Probability | Impact |
 |------------------|-------------|-------------|--------|

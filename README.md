@@ -1,15 +1,17 @@
 # DurableFlow
 
-Most agent demos optimize for intelligence. DurableFlow tests whether agentic workflows can survive production: crashes, approvals, model fallback, cost pressure, context limits, side effects, and unreliable compute.
+Most agent demos optimize for intelligence. DurableFlow is a small educational lab for the operational primitives that make agentic workflows survivable: crashes, approvals, model fallback, cost pressure, context limits, side effects, and unreliable compute.
 
-**For:** backend engineers and infrastructure-minded AI teams evaluating the operational layer underneath agents, not prompt engineering or RAG tutorials.
+**For:** backend engineers and infrastructure-minded AI teams who want to inspect the mechanics underneath production agent platforms, not prompt engineering or RAG tutorials.
+
+In production, use established tools such as Temporal, LangGraph, LiteLLM, and LangSmith. This repo exists because those tools are intentionally large and capable; DurableFlow strips the core ideas down to local SQLite, standard Python, deterministic fixtures, and tests you can read in one sitting.
 
 DurableFlow now has two extension tracks:
 
-| Extension | Status | What it proves |
-|-----------|--------|----------------|
-| [Colony](colony/README.md) | Implemented benchmark | Durable execution turns spot-like compute into completable long-running work, measured against a naive baseline under the same seeded loss schedule. |
-| [Agent Readiness Pack](readiness/README.md) | Spec/design track | A readiness harness for deciding whether an agent is deployable: durable turns, gated writes, failure injection, and a verdict-first report. |
+| Extension | Status | What it demonstrates |
+|-----------|--------|----------------------|
+| [Colony](colony/README.md) | Implemented benchmark | Durable execution can turn spot-like compute into completable long-running work, measured against a naive baseline under the same seeded loss schedule. |
+| [Agent Readiness Pack](readiness/README.md) | Implemented demo | A readiness harness shape for deciding whether an agent is deployable: durable turns, gated writes, failure injection, and a verdict-first report. |
 
 ## Quick start
 
@@ -18,9 +20,11 @@ Requires **Python 3.11+** on macOS or Linux. No API keys required.
 ```bash
 git clone https://github.com/marcospolanco/durableflow.git
 cd durableflow
-./start.sh crash    # crash recovery demo (start here)
-./start.sh test     # full test suite
-./start.sh inbox    # interactive approval demo
+./start.sh crash     # crash recovery demo (start here)
+./start.sh test      # full test suite
+./start.sh inbox     # interactive approval demo
+./start.sh readiness # agent readiness before/after report
+./start.sh mcp       # gated write over MCP CRM server
 ```
 
 Or without `start.sh`:
@@ -80,7 +84,27 @@ Start with **[colony/README.md](colony/README.md)**, then read **[docs/colony-me
 
 **A deployment-readiness layer for agentic workflows.**
 
-The Agent Readiness Pack is the next extension track. Its spec defines how to wrap a reason-act-observe agent so every turn is checkpointed, every external write is idempotent and approval-gated, and six production failure modes are tested before deployment:
+The Agent Readiness Pack wraps a reason-act-observe agent so every turn is checkpointed, every external write is idempotent and approval-gated, and six production failure modes are tested before deployment:
+
+```bash
+python3 examples/readiness_demo.py
+```
+
+Current demo result:
+
+```text
+VERDICT: Ship: the DurableFlow-wrapped agent survived the readiness scenarios.
+
+                         NAKED      WRAPPED    DELTA
+Safety                     0 / 100  100 / 100  +100
+Reliability                0 / 100  100 / 100  +100
+Cost                       0 / 100  100 / 100  +100
+Observability             10 / 100  100 / 100   +90
+-------------------------------------------------------
+OVERALL READINESS          0 / 100  100 / 100  +100
+```
+
+These scores come from deterministic local fixtures. The point is the evaluation shape and failure-mode coverage, not the absolute score.
 
 - tool timeout
 - malformed tool output
@@ -89,9 +113,11 @@ The Agent Readiness Pack is the next extension track. Its spec defines how to wr
 - model fallback
 - crash after side effect
 
-The planned report is intentionally verdict-first: "ship" or "do not ship," the durability delta, and the single unsafe behavior that blocks deployment. The current repo contains the full implementation spec at **[readiness/docs/dflow-readiness-spec.md](readiness/docs/dflow-readiness-spec.md)**; the package implementation and demo are not yet present.
+The report is intentionally verdict-first: "ship" or "do not ship," the durability delta, and the single unsafe behavior that blocks deployment. The demo writes `readiness.json` and `readiness_report.md`.
 
-Start with **[readiness/README.md](readiness/README.md)** for scope, status, and the build contract.
+The MCP path uses the official `mcp==1.13.1` client/server protocol when the optional package is installed, and falls back to a tiny stdio JSON protocol so the demo remains dependency-free. The ADK path is currently an adapter boundary: it verifies `google-adk==1.18.0` import, ADK `Agent` object construction, history conversion, and resume-safe behavior with an ADK-compatible mock. It does not yet claim real Google ADK Runner end-to-end execution.
+
+Start with **[readiness/README.md](readiness/README.md)** for the implementation map, scenarios, and build contract. The full spec remains at **[readiness/docs/dflow-readiness-spec.md](readiness/docs/dflow-readiness-spec.md)**.
 
 ## Architecture notes: scaling LLM-powered assistants
 
@@ -138,6 +164,15 @@ durableflow/
     crash_resume_demo.py
     chaos_benchmark_demo.py
     single_eviction_demo.py
+    readiness_demo.py
+    mcp_demo.py
+  agent/
+    protocol.py
+    runner.py
+    mini_react.py
+    tools.py
+    mcp_client.py
+    adk_adapter.py
   colony/
     README.md
     colony-spec.md
@@ -146,8 +181,15 @@ durableflow/
     provider.py
   readiness/
     README.md
+    harness.py
+    scoring.py
+    view.py
+    vocabulary.py
+    render.py
     docs/
       dflow-readiness-spec.md
+  mcp_server/
+    legacy_crm.py
   data/
     mock_emails.json
     mock_calendar.json
@@ -170,9 +212,28 @@ Token counting is approximate: whitespace word count divided by 0.75. A producti
 
 **Import note:** the Python package lives under `src/` (e.g. `from src.engine import WorkflowEngine`). Examples add the repo root to `PYTHONPATH`; see `start.sh`.
 
-## What this is not
+## Why not X? (Positioning & Primitives)
 
-This is not a production system, a Temporal replacement, a distributed scheduler, or a general-purpose agent framework. It is a proof of concept exploring the operational primitives and measurement harnesses behind deployable agentic workflows. A production implementation would use Temporal or a comparable durable execution framework, vector search for context retrieval, real provider clients with rate-limit handling, and a proper secrets manager for API credentials.
+If you are deploying agentic workflows in production, you should use established enterprise tools. DurableFlow is not a replacement for them. Instead, it serves as a **zero-dependency reference implementation and stress-test sandbox** designed to isolate, inspect, and measure operational primitives.
+
+### DurableFlow vs. Temporal
+* **What Temporal does:** The industry gold-standard for durable execution.
+* **Why not Temporal here:** Running Temporal requires hosting a cluster (Temporal server, Postgres/Cassandra database, and backend workers). DurableFlow utilizes SQLite and standard Python libraries to demonstrate the raw mechanics of checkpointing, approval gates, and crash resume in a single local file context.
+
+### DurableFlow vs. LangGraph / CrewAI
+* **What they do:** Powerful libraries and runtimes for agent orchestration, graph state, reasoning loops, persistence, and human-in-the-loop workflows.
+* **Why not LangGraph/CrewAI here:** DurableFlow is not trying to compete with those frameworks. It isolates a few operational primitives in plain Python so you can see exactly what is persisted, when a checkpoint is written, how an approval pause resumes, and how idempotency prevents duplicate side effects. It is a teaching fixture and test harness, not a better agent framework.
+
+### DurableFlow vs. LangSmith / Arize Phoenix
+* **What they do:** Tracing, logging, and evaluation datasets.
+* **Why not LangSmith here:** Observability platforms are the right place to inspect traces, monitor quality, and run evaluation programs around real systems. DurableFlow focuses on the runtime mechanics themselves: the local approval gate, the side-effect log, fallback routing, and active failure injection against those mechanisms.
+
+### Production Recommendations
+For production rollouts, we recommend:
+* Use **Temporal** or an equivalent orchestrator for durability.
+* Use **LangGraph** or **LlamaIndex Workflows** to design reasoning structures.
+* Use **LiteLLM** or **Portkey** for model routing, gateways, and cost tracking.
+* Use **LangSmith** for trace observation and dataset evaluation.
 
 ## Contributing
 

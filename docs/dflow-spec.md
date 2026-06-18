@@ -21,15 +21,13 @@ This is not an assistant. It is the engine underneath one.
 
 The personal AI assistant category is growing fast, but nearly all public demos focus on the intelligence layer (prompts, RAG, agent frameworks). The operational layer -- how you make a multi-step, LLM-dependent workflow survive crashes, respect human approval gates, manage inference cost, and select the right context under token limits -- is underdiscussed and underbuilt. This repo addresses that gap as an open-source reference implementation of the infrastructure primitives.
 
-Secondarily, this artifact demonstrates the author's engineering depth in the specific problem space of agentic workflow infrastructure for job search purposes (staff/founding backend engineer roles at AI-native startups). The README and code should read as genuine technical interest, not as a job application artifact.
-
 The core runtime must remain small, but it must be extensible enough for sibling packages to register their own step sequences, emit domain-specific telemetry, and choose whether an approval rejection terminates a workflow or returns a denial observation to a later step. The default inbox triage workflow keeps terminal rejection semantics.
 
 ### Who
 
-**Primary audience:** Senior backend engineers and engineering leaders evaluating candidates or exploring agentic infrastructure patterns. The README should be useful to anyone building production assistant systems.
+**Primary audience:** Senior backend engineers and engineering leaders exploring agentic infrastructure patterns. The README should be useful to anyone building production assistant systems.
 
-**Implicit audience:** Founders and CTOs at AI-native assistant startups who will evaluate both the code quality and the architectural understanding embedded in the README.
+**Implicit audience:** Developers and architects building production assistant systems who want to verify the implementation's architectural invariants.
 
 ---
 

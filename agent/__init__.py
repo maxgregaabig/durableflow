@@ -1,0 +1,2 @@
+"""Agent readiness extension package."""
+

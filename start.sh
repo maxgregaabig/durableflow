@@ -63,6 +63,12 @@ run_demo() {
     inbox)
       python "$ROOT/examples/inbox_triage_demo.py"
       ;;
+    readiness)
+      python "$ROOT/examples/readiness_demo.py"
+      ;;
+    mcp)
+      python "$ROOT/examples/mcp_demo.py"
+      ;;
     test | tests)
       require_pytest
       install_if_stale
@@ -75,6 +81,8 @@ Usage: ./start.sh [command]
 Commands:
   crash   Run crash recovery demo (default)
   inbox   Run full inbox triage demo with interactive approval
+  readiness Run agent readiness before/after report
+  mcp     Run gated write demo over the mock legacy CRM server
   test    Run the test suite
   help    Show this message
 

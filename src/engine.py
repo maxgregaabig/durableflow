@@ -129,6 +129,25 @@ class WorkflowEngine:
                 return state.current_step + 1
             return len(self._steps)
         if request.status == "approved":
+            commit_handlers = self.dependencies.get("approval_commit_handlers", {})
+            commit_handler = (
+                commit_handlers.get(request.step_name)
+                if isinstance(commit_handlers, dict)
+                else None
+            )
+            if commit_handler is not None:
+                result = commit_handler(state, request, self.dependencies)
+                if not isinstance(result, StepResult):
+                    raise TypeError("approval commit handler must return StepResult")
+                self.store.save_checkpoint(state.workflow_id, state.current_step, result)
+                self.telemetry.log_approval_decision(
+                    state.workflow_id,
+                    request.step_name,
+                    "approved",
+                    request.decided_by,
+                )
+                self.store.update_status(state.workflow_id, WorkflowStatus.APPROVED)
+                return state.current_step + 1
             self.store.save_checkpoint(
                 state.workflow_id,
                 state.current_step,

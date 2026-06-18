@@ -40,21 +40,19 @@ Subpackages and demos layered on DurableFlow that turn a fragile prototype agent
 4. An **MCP server** exposing a mock legacy CRM and ticketing system, with both write tools gated behind operator approval.
 5. A **field-pattern document** naming the repeatable pattern an FDE applies when a customer prototype meets enterprise reality.
 
-The reference agent is a support ticket triage and resolution agent. The default implementation is a minimal ReAct agent on DurableFlow's mock router with zero external dependencies, so the readiness demo always runs. An optional adapter wraps a real `google-adk` agent through the identical runner interface, proving the pattern is framework agnostic and works with Google's stack.
+The reference agent is a support ticket triage and resolution agent. The default implementation is a minimal ReAct agent on DurableFlow's mock router with zero external dependencies, so the readiness demo always runs. An optional ADK-compatible adapter boundary demonstrates the same `AgentStep` interface against mock ADK-shaped objects and can construct a `google-adk` agent object when the optional package is installed. A real Google ADK Runner end-to-end harness is not claimed until an event-stream adapter and no-network ADK fixture are added.
 
 This is not an agent. It is the layer that decides whether an agent is allowed near a customer's systems.
 
 ### 1.2 Why
 
-The gap between a working agent prototype and a deployable one is where enterprise AI projects stall, and it is the gap almost nobody has credible evidence for. The Forward Deployed Engineer V role at Google Cloud is defined by this gap: transition rapid prototypes to production grade agentic workflows, build evaluation pipelines and observability frameworks, build MCP servers, connect AI systems to legacy enterprise infrastructure, identify repeatable field patterns. This artifact demonstrates every one of those responsibilities end to end, with before/after evidence and a generalizable pattern.
-
-The artifact reads as genuine engineering interest in the readiness problem, not as a job application.
+The gap between a working agent prototype and a deployable one is where enterprise AI projects stall, and it is the gap almost nobody has credible evidence for. Enterprise deployment requires transitioning rapid prototypes to production-grade agentic workflows: building evaluation pipelines, observability frameworks, MCP servers, connecting AI systems to legacy enterprise infrastructure, and identifying repeatable field patterns. This artifact demonstrates how to achieve this with before/after evidence and a generalizable pattern.
 
 ### 1.3 Who
 
-**Primary persona:** Forward deployed engineers and solutions architects who deploy agents into customer environments and must decide whether a prototype is safe to ship.
+**Primary persona:** Solutions architects and systems engineers who deploy agents into enterprise environments and must decide whether a prototype is safe to ship.
 
-**Implicit audience:** The FDE V hiring chain at Google Cloud, who should be able to run the before/after readiness demo in under 60 seconds and read the field-pattern doc in under five minutes.
+**Implicit audience:** Technical leaders and evaluators who need to inspect the before/after readiness demo and read the field-pattern doc to verify the design.
 
 ### 1.4 Intent Mapping (semantics-policy section 1)
 
@@ -398,17 +396,17 @@ What the durability layer bought:
 
 ### Phase 10: ADK Adapter, Documentation, Field Pattern
 
-**Scope:** Optional Google ADK adapter, README repositioning, field-pattern writeup, tests.
+**Scope:** Optional ADK-compatible adapter boundary, README repositioning, field-pattern writeup, tests.
 
 **Files:** `agent/adk_adapter.py`, `README.md`, `docs/field-pattern.md`, `tests/*`
 
 **Deliverables:**
-- `adk_adapter.py`: `ADKAgentAdapter` drives a `google-adk` ReAct agent one turn at a time behind the `AgentStep` protocol, routing tool calls through the same interception, gating, and idempotency. Optional group `[adk]`. When absent, the mini agent is used. This is the Google-specific wedge: the same harness and report run against a real Google ADK agent.
-- `README.md`: headline "Most agent demos optimize for intelligence. DurableFlow tests whether an agent can survive production."; one-command quick start; the before/after verdict table; the six failure modes; ~200 words on the turn-to-checkpoint bridge; ~150 words on gated writes over MCP; "works with your framework" (mini ReAct, Google ADK, any `AgentStep`); "what this is not." Tone: genuine interest in the readiness problem. The target role and company are never named.
+- `adk_adapter.py`: `ADKAgentAdapter` defines the adapter boundary for ADK-compatible agents behind the `AgentStep` protocol. It supports mock ADK-shaped objects in the zero-dependency test path and can construct a `google-adk` `Agent` object when optional group `[adk]` is installed. It does not yet drive Google ADK's `Runner.run_async` event stream through the readiness harness.
+- `README.md`: headline "Most agent demos optimize for intelligence. DurableFlow tests whether an agent can survive production."; one-command quick start; the before/after verdict table; the six failure modes; ~200 words on the turn-to-checkpoint bridge; ~150 words on gated writes over MCP; "works with your runner boundary" (mini ReAct, ADK-compatible mock, any `AgentStep`); "what this is not." Tone: genuine interest in the readiness problem.
 - `docs/field-pattern.md`: names the Durable Agent Pattern (wrap the agent loop in a durable shell, checkpoint every turn, make every external write idempotent, gate every write until policy can replace the human); the six failure modes as a field checklist; the before/after readiness delta as the justifying evidence; one forward-reference paragraph to authorization policy as the next hard problem.
 
 **Target acceptance criteria:**
-- [ ] ADK adapter runs the readiness harness against a real `google-adk` agent when `[adk]` is installed
+- [ ] ADK adapter boundary is resume-safe, mock-verified, and clearly does not claim real Google ADK Runner end-to-end execution until a no-network ADK fixture exists
 - [ ] README leads with a runnable command and the before/after verdict table
 - [ ] `docs/field-pattern.md` is readable in under five minutes and names a pattern, not a tool
 - [ ] All extension tests pass with `pytest tests/`
@@ -545,7 +543,7 @@ Every readiness-report data field maps to a `build_readiness_view()` output fiel
 |---------|----------|-----------|
 | T-INT-101 | Full readiness demo, mini agent | Both configs run all six scenarios; report emitted; wrapped > naked |
 | T-INT-102 | MCP demo end to end | Ticket resolved over MCP; write gated then applied once |
-| T-INT-103 | ADK adapter (if `[adk]` present) | Same harness runs against a google-adk agent and emits a report |
+| T-INT-103 | ADK adapter boundary (if `[adk]` present) | Package import and ADK object construction work; mock ADK-compatible adapter remains resume-safe |
 
 ### 5.3 UX Fitness Functions (semantics-policy section 7, adapted to a CLI/Markdown report)
 
@@ -588,7 +586,7 @@ Every readiness-report data field maps to a `build_readiness_view()` output fiel
 - [ ] README before/after table matches `readiness_demo.py` output format
 - [ ] `docs/field-pattern.md` claims match implemented behavior
 - [ ] No DEFERRED item claimed as complete
-- [ ] FDE V responsibilities are paraphrased from the public posting, not quoted; the role and company are never named in the public repo
+- [ ] Documentation does not refer to target organizations or internal specification metadata
 
 ### 6.5 Presentation Layer Verification (spec-policy section 6.5)
 - [ ] `render_readiness_markdown` and `render_readiness_cli` accept `ReadinessView` only, not `ReadinessComparison` or `ScenarioResult`
@@ -634,7 +632,7 @@ Every readiness-report data field maps to a `build_readiness_view()` output fiel
 | Injection overreach | The injection is a realistic CRM-record payload; both configs run it; T-HAR-004 shows the naked config executing the write | Phase 7, T-HAR-003/004 |
 
 **Deferred items (accepted technical debt):**
-- ADK adapter is optional; the framework-agnostic claim holds via the `AgentStep` protocol and the mini agent.
+- ADK adapter is optional; the framework-agnostic claim holds via the `AgentStep` protocol and the mini agent. Real Google ADK Runner integration remains a future adapter task.
 - MCP transport is stdio only; no remote MCP.
 - Authorization policy beyond the approval gate is out of scope and named as the next hard problem in the field-pattern doc.
 - Token counting remains approximate (inherited from core).
@@ -694,10 +692,10 @@ Every readiness-report data field maps to a `build_readiness_view()` output fiel
 - NEVER claim "gated writes" if any write tool can execute before approval
 - NEVER claim a readiness score not computed from a real run
 - NEVER claim "crash recovery" if the crash uses try/except instead of a process-level crash
-- NEVER claim "works with Google ADK" if the adapter does not run the harness against a real `google-adk` agent
+- NEVER claim "works end to end with Google ADK Runner" unless the adapter runs the readiness harness against a real no-network `google-adk` fixture
 - NEVER pass a domain DTO directly to a renderer; the builder is mandatory
 - NEVER let a metric field name or telemetry event headline the report
-- NEVER name the target role or company in the public repo
+- NEVER include target organizational names in the documentation
 - NEVER pin a dependency with `>=`
 
 ### 10.3 Spec Victory Declaration Anti-Patterns

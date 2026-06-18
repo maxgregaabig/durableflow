@@ -68,3 +68,5 @@ examples/*.sqlite-*
 examples/*-wal
 examples/*-shm
 examples/*.telemetry.jsonl
+readiness.json
+readiness_report.md
