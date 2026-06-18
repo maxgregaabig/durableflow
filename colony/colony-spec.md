@@ -4,7 +4,7 @@
 **Author:** Marcos Polanco
 **Created:** 2026-06-17
 **Target completion:** 2026-07-01 (10-day build, extends existing `durableflow`)
-**Repository:** `durableflow` (new package `colony/` + extension of existing engine)
+**Repository:** `durableflow` (top-level sibling package `colony/` + extension of existing engine)
 **Visibility:** This spec is a private implementation guide. The public artifact is the repo: README, code, tests, the chaos benchmark, and the result table.
 **Depends on:** `durableflow` v0.1 (existing). This spec extends, does not replace, the durable execution engine.
 
@@ -178,7 +178,7 @@ Scenario: Operator perceives "this costs real money and it is accounted"
 
 ## 3. Phased Implementation Plan
 
-Phases follow spec-policy §3. Colony reuses `durableflow` Phase 1 (engine, store, checkpoint/resume, side-effect log) without modification where possible. New work is additive.
+Phases follow spec-policy §3. Colony reuses `durableflow` Phase 1 (engine, store, checkpoint/resume, side-effect log) without modification where possible. New work is additive. Current repo-level package discovery includes sibling extension packages (`colony*`, and future `agent*`, `readiness*`, `mcp_server*`) alongside `src*`.
 
 ### Phase 1: Core Data Models & Infrastructure
 
@@ -263,7 +263,7 @@ Phases follow spec-policy §3. Colony reuses `durableflow` Phase 1 (engine, stor
 
 ### Phase 3: Telemetry, Benchmark Harness, & Fixtures
 
-**Scope:** Structured telemetry (reuses durableflow's `TelemetryLogger` pattern), the benchmark harness that runs both rows and emits the comparison, and seeded fixtures.
+**Scope:** Structured telemetry (reuses durableflow's `TelemetryLogger.log_event()` extension hook), the benchmark harness that runs both rows and emits the comparison, and seeded fixtures.
 
 **Files:**
 - `colony/telemetry_ext.py` -- Colony event types on top of the existing telemetry logger
@@ -277,7 +277,7 @@ Phases follow spec-policy §3. Colony reuses `durableflow` Phase 1 (engine, stor
 
 #### telemetry_ext.py
 - Event types: `instance_acquired`, `instance_lost`, `job_dispatched`, `job_checkpointed`, `job_recovering`, `job_resumed`, `job_completed`, `budget_halt`, `run_complete`
-- JSON-lines output, reusing the durableflow logger; `summarize_run(run_id) -> RunReport`
+- JSON-lines output, reusing the durableflow logger's generic `log_event()` method; `summarize_run(run_id) -> RunReport`
 
 #### benchmark.py
 - `Benchmark.run(batch, budget, chaos_profile, provider_factory) -> BenchmarkResult`
@@ -395,8 +395,8 @@ The primary semantic object is **NOT** `Job` or `Instance` records. It is **"is 
 
 #### pyproject.toml
 - Reuse durableflow base (stdlib-only core)
-- Optional `[vast]` extra: the Vast SDK/CLI client, pinned `==`
-- Optional `[dev]`: `pytest==8.x` (match durableflow pin)
+- Optional `[vast]` extra: currently empty while the live smoke path uses a gated `VastProvider` stub; any future Vast SDK/CLI client must be pinned with `==`
+- Optional `[dev]`: `pytest==8.4.2` (match durableflow pin)
 - No new required dependency for mock mode
 
 #### Tests
@@ -495,7 +495,7 @@ All methods and imports above are defined in this specification or inherited fro
 - [x] All acceptance criteria explicitly written and unambiguous (per phase)
 - [x] Each claimed capability has a verification method (Test IDs mapped in §5)
 - [x] No TBD/TODO placeholders in this specification
-- [x] Dependencies listed and pinned: stdlib-only core; `[vast]` extra pinned `==`; `pytest` dev pinned. Durableflow v0.1 is a pinned internal dependency.
+- [x] Dependencies listed and pinned: stdlib-only core; `[vast]` extra currently has no selected third-party client; `pytest==8.4.2` dev pinned. Durableflow v0.1 is a pinned internal dependency.
 
 ### 4.2 Cross-Reference Consistency
 - [x] Narrative (§1) claims match detailed phases (§3): durability, recovery, chaos identity, benchmark, cost
@@ -556,8 +556,8 @@ T-INT-005 is a gated manual smoke test, not part of the default CI run (requires
 
 ### 6.3 Dependency Verification
 - [ ] Core remains stdlib-only (mock mode requires no third-party package)
-- [ ] `[vast]` extra pinned with `==`
-- [ ] `pytest` pinned with `==`, matching durableflow
+- [ ] `[vast]` extra has no unpinned dependency; any future Vast SDK/CLI client is pinned with `==`
+- [ ] `pytest` pinned with `==8.4.2`, matching durableflow
 - [ ] No new required dependency added without rationale in README design decisions
 
 ### 6.4 Cross-Reference Validation
@@ -696,7 +696,7 @@ Before marking any phase COMPLETE: run exit gates (§6); verify no TODOs on clai
 ```
 durableflow/
   README.md                          # Phase 5 -- add Colony section
-  pyproject.toml                     # Phase 5 -- add [vast] extra
+  pyproject.toml                     # Phase 5 -- includes colony package discovery and [vast] extra
   docs/
     colony-spec.md                   # this document (private)
     colony-methodology.md            # Phase 5 -- the research-grade writeup
@@ -713,7 +713,7 @@ durableflow/
     chaos.py                         # Phase 2 -- seeded chaos schedule
     baseline.py                      # Phase 2 -- naive runner
     cost.py                          # Phase 2 -- GPU-hour accounting
-    telemetry_ext.py                 # Phase 3 -- Colony event types
+    telemetry_ext.py                 # Phase 3 -- Colony event types via TelemetryLogger.log_event
     benchmark.py                     # Phase 3 -- runs both rows, emits BenchmarkResult
     views.py                         # Phase 4a -- ScoreboardView, ComparisonView, builders
     view_fixtures.py                 # Phase 4b -- scenario catalog
@@ -746,7 +746,7 @@ durableflow/
 | chaos.py | models | -- | random, dataclasses, typing | -- |
 | baseline.py | models, provider, cost, telemetry_ext | -- | time, typing | -- |
 | cost.py | models | -- | -- | -- |
-| telemetry_ext.py | models | telemetry (REUSED) | json, datetime | -- |
+| telemetry_ext.py | -- | telemetry (REUSED) | typing | -- |
 | benchmark.py | models, controller, baseline, chaos, cost | -- | dataclasses, statistics, typing | -- |
 | views.py | models, benchmark | -- | dataclasses, typing | -- |
 | view_fixtures.py | views | -- | -- | -- |

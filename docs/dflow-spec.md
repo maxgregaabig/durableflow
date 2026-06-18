@@ -23,6 +23,8 @@ The personal AI assistant category is growing fast, but nearly all public demos 
 
 Secondarily, this artifact demonstrates the author's engineering depth in the specific problem space of agentic workflow infrastructure for job search purposes (staff/founding backend engineer roles at AI-native startups). The README and code should read as genuine technical interest, not as a job application artifact.
 
+The core runtime must remain small, but it must be extensible enough for sibling packages to register their own step sequences, emit domain-specific telemetry, and choose whether an approval rejection terminates a workflow or returns a denial observation to a later step. The default inbox triage workflow keeps terminal rejection semantics.
+
 ### Who
 
 **Primary audience:** Senior backend engineers and engineering leaders evaluating candidates or exploring agentic infrastructure patterns. The README should be useful to anyone building production assistant systems.
@@ -74,6 +76,14 @@ Scenario: Approval rejection
   And no send step executes
   And the telemetry log records the rejection
 
+Scenario: Extension workflow continues after rejected approval
+  Given an extension workflow registers an approval step with rejection policy "continue"
+  And the workflow is paused on a side-effecting operation
+  When the operator rejects the operation
+  Then the rejection is checkpointed as the step output
+  And the workflow resumes at the next registered step
+  And the workflow does not transition to state "rejected"
+
 Scenario: Model fallback on provider failure
   Given the primary model provider returns a 500 error or times out after 30 seconds
   When the engine retries the LLM call
@@ -112,8 +122,10 @@ Scenario: Cost accounting per workflow
 **Deliverables:**
 - `WorkflowState` dataclass: `workflow_id`, `workflow_type`, `current_step`, `step_data` (JSON), `status` enum, `created_at`, `updated_at`
 - `StepResult` dataclass: `step_name`, `output` (JSON-serializable dict), `duration_ms`, `cost_usd`, `model_used`, `timestamp`
+- `WorkflowStep` dataclass: `name`, `fn`; a convenience wrapper for extension packages that build step lists programmatically
+- `ApprovalRejectionPolicy` enum: `terminate`, `continue`
 - `WorkflowStore` class with methods: `create_workflow()`, `save_checkpoint()`, `load_workflow()`, `list_pending()`, `update_status()`
-- `WorkflowEngine` class with methods: `register_step()`, `execute()`, `resume()`, `_run_from_step()`
+- `WorkflowEngine` class with methods: `register_step()`, `register_steps()`, `execute()`, `resume()`, `_run_from_step()`
 - SQLite schema: `workflows` table, `step_results` table, `approval_queue` table, `side_effect_log` table
 
 **Status enum values:** `pending`, `running`, `paused_approval`, `approved`, `rejected`, `completed`, `failed`, `crashed`
@@ -124,6 +136,8 @@ Scenario: Cost accounting per workflow
 - [ ] Each step's output is stored and available to subsequent steps
 - [ ] Crashed workflows are detectable on restart (status = `running` with stale `updated_at`)
 - [ ] No in-memory-only state that would be lost on crash
+- [ ] Extension packages can register a deterministic list of steps with `register_steps()`
+- [ ] Approval rejection defaults to terminal, but a step can opt into continue semantics through `approval_rejection_policies`
 
 ### Phase 2: Logic Engines & Processing
 
@@ -202,6 +216,7 @@ side_effect_log table:
 - [ ] Context selector returns items ranked by relevance (highest first)
 - [ ] Approval gate persists request to SQLite; workflow does not proceed until approved
 - [ ] Approval rejection terminates the workflow with status `rejected`
+- [ ] Extension workflows may set `dependencies["approval_rejection_policies"][step_name] = "continue"` so a rejected approval is checkpointed as `{"approved": false, ...}` and execution resumes at the next step
 - [ ] Workflow steps access prior step outputs via `step_data` dict, not global state
 - [ ] `send_reply` checks side-effect log before executing; skips if idempotency key exists
 
@@ -221,7 +236,8 @@ side_effect_log table:
 #### telemetry.py
 
 - `WorkflowEvent` dataclass: `event_type`, `workflow_id`, `step_name`, `timestamp`, `duration_ms`, `cost_usd`, `model_used`, `metadata` (dict)
-- `TelemetryLogger` class with methods: `log_step_start()`, `log_step_complete()`, `log_crash()`, `log_resume()`, `log_approval_request()`, `log_approval_decision()`, `log_fallback()`, `log_workflow_complete()`
+- `TelemetryLogger` class with methods: `log()`, `log_event()`, `log_step_start()`, `log_step_complete()`, `log_crash()`, `log_resume()`, `log_approval_request()`, `log_approval_decision()`, `log_fallback()`, `log_workflow_complete()`
+- `log_event()` is the generic extension hook for domain-specific events such as tool timeouts or duplicate side-effect prevention; core named helpers remain for stable workflow events
 - Output format: structured JSON lines to stdout and optionally to a `telemetry.jsonl` file
 - Summary method: `summarize_workflow(workflow_id) -> dict` returning total cost, total latency, step count, fallback count, approval wait time
 
@@ -361,8 +377,11 @@ The semantics-policy's UI Semantic Data Model (section 5), presentation contract
 
 - Python >=3.11
 - Zero required external dependencies (stdlib only for core)
-- Optional dependency group `[providers]`: `anthropic>=0.30.0`
-- Optional dependency group `[dev]`: `pytest>=8.0`
+- Optional dependency group `[providers]`: `anthropic==0.69.0`
+- Optional dependency group `[mcp]`: `mcp==1.13.1`
+- Optional dependency group `[adk]`: `google-adk==1.18.0`
+- Optional dependency group `[dev]`: `pytest==8.4.2`
+- Package discovery includes core and sibling extension packages: `src*`, `colony*`, `agent*`, `readiness*`, `mcp_server*`
 
 #### Tests
 
@@ -375,6 +394,9 @@ The semantics-policy's UI Semantic Data Model (section 5), presentation contract
 | T-APR-002 | test_approval_gate.py | Operator approves | Workflow resumes and completes |
 | T-APR-003 | test_approval_gate.py | Operator rejects | Workflow status is rejected; send step never executes |
 | T-APR-004 | test_approval_gate.py | Approval gate persists across restart | Stop engine, restart, approval still pending in SQLite |
+| T-EXT-001 | test_extensibility.py | Extension registers `WorkflowStep` list | Steps execute in registered order |
+| T-EXT-002 | test_extensibility.py | Rejected approval with continue policy | Rejection is checkpointed; next step runs; workflow completes |
+| T-EXT-003 | test_extensibility.py | Generic telemetry event | JSON line contains extension event type, step, and metadata |
 | T-CTX-001 | test_context_budget.py | Corpus of 200 items, budget of 4096 tokens | Selected items total <= 4096 tokens |
 | T-CTX-002 | test_context_budget.py | Relevance ranking | Top item is semantically closest to query (verified with known corpus) |
 | T-CTX-003 | test_context_budget.py | Empty corpus | Returns empty list, no crash |
@@ -384,7 +406,7 @@ The semantics-policy's UI Semantic Data Model (section 5), presentation contract
 **Target acceptance criteria:**
 - [ ] All tests pass with `pytest tests/`
 - [ ] README renders correctly on GitHub
-- [ ] `pyproject.toml` installs with `pip install -e .` on Python 3.11+
+- [ ] `pyproject.toml` installs with `pip install -e .` on Python 3.11+ and includes sibling extension packages
 - [ ] No external API keys required to run tests or crash_resume_demo
 
 ---
@@ -395,7 +417,7 @@ This project has no user-facing UI. The contract structure is:
 
 | Contract | Purpose | This Project |
 |----------|---------|--------------|
-| **Domain contract** | Engine/workflow outputs | `WorkflowState`, `StepResult`, `ModelResponse`, `ApprovalRequest` |
+| **Domain contract** | Engine/workflow outputs | `WorkflowState`, `StepResult`, `WorkflowStep`, `ModelResponse`, `ApprovalRequest` |
 | **Presentation contract** | UI view model + builder | **DEFERRED** -- no UI |
 | **Render contract** | Component functions | **DEFERRED** -- no UI |
 
@@ -480,7 +502,7 @@ All methods and imports above are defined in this specification. No undefined it
 - [x] All acceptance criteria are explicitly written and unambiguous
 - [x] Each capability claimed has a clear verification method (test IDs mapped)
 - [x] No "TBD" or "TODO" placeholders in the specification
-- [x] Dependencies are explicitly listed: zero required; `anthropic>=0.30.0` optional; `pytest>=8.0` dev
+- [x] Dependencies are explicitly listed: zero required; `anthropic==0.69.0`, `mcp==1.13.1`, and `google-adk==1.18.0` optional; `pytest==8.4.2` dev
 
 ### 4.2 Cross-Reference Consistency
 
@@ -513,6 +535,9 @@ All methods and imports above are defined in this specification. No undefined it
 | T-APR-002 | approval.py, engine.py | Operator approves | Workflow resumes and reaches completed |
 | T-APR-003 | approval.py, engine.py | Operator rejects | Status is rejected; send_reply never called |
 | T-APR-004 | approval.py, store.py | Approval persists across restart | New engine instance sees pending approval |
+| T-EXT-001 | engine.py | Register a list of `WorkflowStep` objects | Steps execute in order |
+| T-EXT-002 | engine.py, approval.py | Rejected approval with `continue` policy | Rejection checkpoint is available to the next step |
+| T-EXT-003 | telemetry.py | Extension emits a generic event | JSON line contains event type, step, and metadata |
 | T-CTX-001 | context_selector.py | Large corpus, limited budget | Total tokens of selection <= budget |
 | T-CTX-002 | context_selector.py | Known corpus with obvious best match | Top-ranked item is the expected one |
 | T-CTX-003 | context_selector.py | Empty corpus | Returns empty list without error |
@@ -561,8 +586,10 @@ For each claimed capability:
 ### 6.3 Dependency Verification
 
 - [ ] Zero required dependencies (stdlib only)
-- [ ] `anthropic` pinned as optional: `anthropic>=0.30.0`
-- [ ] `pytest` pinned as dev: `pytest>=8.0`
+- [ ] `anthropic` pinned as optional: `anthropic==0.69.0`
+- [ ] `mcp` pinned as optional: `mcp==1.13.1`
+- [ ] `google-adk` pinned as optional: `google-adk==1.18.0`
+- [ ] `pytest` pinned as dev: `pytest==8.4.2`
 - [ ] No dependency added without rationale in README design decisions section
 
 ### 6.4 Cross-Reference Validation
@@ -725,6 +752,7 @@ durableflow/
     test_resume.py                   # Phase 5 -- T-RES-001 to T-RES-003, T-IDP-001
     test_approval_gate.py            # Phase 5 -- T-APR-001 to T-APR-004
     test_context_budget.py           # Phase 5 -- T-CTX-001 to T-CTX-004
+    test_extensibility.py            # Phase 5 -- T-EXT-001 to T-EXT-003
 ```
 
 ---
@@ -734,7 +762,7 @@ durableflow/
 | Module | Imports From (internal) | Imports From (stdlib) | Imports From (external) |
 |--------|------------------------|-----------------------|------------------------|
 | store.py | -- | sqlite3, json, dataclasses, datetime, uuid, enum, hashlib | -- |
-| engine.py | store, telemetry | dataclasses, datetime, typing | -- |
+| engine.py | store, telemetry | dataclasses, enum, time, typing | -- |
 | workflows.py | model_router, context_selector, approval, store | json, pathlib, hashlib | -- |
 | model_router.py | -- | dataclasses, time, typing | anthropic (optional) |
 | context_selector.py | -- | dataclasses, math, collections, re | -- |

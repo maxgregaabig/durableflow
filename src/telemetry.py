@@ -56,6 +56,29 @@ class TelemetryLogger:
             with self.path.open("a", encoding="utf-8") as handle:
                 handle.write(line + "\n")
 
+    def log_event(
+        self,
+        event_type: str,
+        workflow_id: str,
+        step_name: str | None = None,
+        *,
+        duration_ms: float = 0.0,
+        cost_usd: float = 0.0,
+        model_used: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        self.log(
+            WorkflowEvent(
+                event_type,
+                workflow_id,
+                step_name,
+                duration_ms=duration_ms,
+                cost_usd=cost_usd,
+                model_used=model_used,
+                metadata=metadata or {},
+            )
+        )
+
     def log_step_start(self, workflow_id: str, step_name: str) -> None:
         self.log(WorkflowEvent("step_start", workflow_id, step_name))
 
@@ -150,4 +173,3 @@ class TelemetryLogger:
                 1 for event in events if event["event_type"] == "approval_requested"
             ),
         }
-

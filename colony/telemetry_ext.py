@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.telemetry import TelemetryLogger, WorkflowEvent
+from src.telemetry import TelemetryLogger
 
 
 def log_colony_event(
@@ -11,4 +11,4 @@ def log_colony_event(
     event_type: str,
     metadata: dict[str, Any] | None = None,
 ) -> None:
-    telemetry.log(WorkflowEvent(event_type, workflow_id=run_id, metadata=metadata or {}))
+    telemetry.log_event(event_type, run_id, metadata=metadata or {})

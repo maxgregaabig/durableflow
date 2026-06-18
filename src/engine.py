@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any, Callable
 
 from .store import StepResult, WorkflowState, WorkflowStatus, WorkflowStore
@@ -16,6 +17,17 @@ class PauseForApproval:
 
 
 StepFunction = Callable[[WorkflowState, dict[str, Any], dict[str, Any]], StepResult | PauseForApproval]
+
+
+class ApprovalRejectionPolicy(StrEnum):
+    TERMINATE = "terminate"
+    CONTINUE = "continue"
+
+
+@dataclass(frozen=True)
+class WorkflowStep:
+    name: str
+    fn: StepFunction
 
 
 class WorkflowEngine:
@@ -37,6 +49,14 @@ class WorkflowEngine:
 
     def register_step(self, step_name: str, fn: StepFunction) -> None:
         self._steps.append((step_name, fn))
+
+    def register_steps(self, steps: list[WorkflowStep] | list[tuple[str, StepFunction]]) -> None:
+        for step in steps:
+            if isinstance(step, WorkflowStep):
+                self.register_step(step.name, step.fn)
+            else:
+                name, fn = step
+                self.register_step(name, fn)
 
     def replace_step(self, step_name: str, fn: StepFunction) -> None:
         for index, (name, _existing) in enumerate(self._steps):
@@ -83,6 +103,7 @@ class WorkflowEngine:
         if request is None:
             return state.current_step + 1
         if request.status == "rejected":
+            policy = self._approval_rejection_policy(request.step_name)
             self.store.save_checkpoint(
                 state.workflow_id,
                 state.current_step,
@@ -103,6 +124,9 @@ class WorkflowEngine:
                 "rejected",
                 request.decided_by,
             )
+            if policy == ApprovalRejectionPolicy.CONTINUE:
+                self.store.update_status(state.workflow_id, WorkflowStatus.APPROVED)
+                return state.current_step + 1
             return len(self._steps)
         if request.status == "approved":
             self.store.save_checkpoint(
@@ -123,6 +147,12 @@ class WorkflowEngine:
             self.store.update_status(state.workflow_id, WorkflowStatus.APPROVED)
             return state.current_step + 1
         return state.current_step
+
+    def _approval_rejection_policy(self, step_name: str) -> ApprovalRejectionPolicy:
+        policies = self.dependencies.get("approval_rejection_policies", {})
+        if not isinstance(policies, dict):
+            return ApprovalRejectionPolicy.TERMINATE
+        return ApprovalRejectionPolicy(policies.get(step_name, ApprovalRejectionPolicy.TERMINATE))
 
     def _run_from_step(self, workflow_id: str, step_index: int) -> WorkflowState:
         index = step_index

@@ -1,8 +1,15 @@
-# Durable Flow
+# DurableFlow
 
-Assistants are easy to demo and hard to operate. This repo explores the infrastructure primitives needed to run them reliably.
+Most agent demos optimize for intelligence. DurableFlow tests whether agentic workflows can survive production: crashes, approvals, model fallback, cost pressure, context limits, side effects, and unreliable compute.
 
-**For:** backend engineers learning how to operate multi-step LLM workflows (durability, approval, cost, idempotency) — not prompt engineering or RAG tutorials.
+**For:** backend engineers and infrastructure-minded AI teams evaluating the operational layer underneath agents, not prompt engineering or RAG tutorials.
+
+DurableFlow now has two extension tracks:
+
+| Extension | Status | What it proves |
+|-----------|--------|----------------|
+| [Colony](colony/README.md) | Implemented benchmark | Durable execution turns spot-like compute into completable long-running work, measured against a naive baseline under the same seeded loss schedule. |
+| [Agent Readiness Pack](readiness/README.md) | Spec/design track | A readiness harness for deciding whether an agent is deployable: durable turns, gated writes, failure injection, and a verdict-first report. |
 
 ## Quick start
 
@@ -29,7 +36,7 @@ After the demos, work through **[docs/exercises.md](docs/exercises.md)** — gui
 
 ## What this is
 
-A minimal Python runtime for multi-step LLM assistant workflows. It demonstrates:
+A minimal Python runtime for multi-step LLM and agentic workflows. It demonstrates:
 
 - **Durable execution** — SQLite checkpoint after every step; resume from last completed step
 - **Crash recovery** — real process kill (`os._exit`) in a subprocess, not mocked exceptions
@@ -42,19 +49,49 @@ It is not another assistant framework. It is the small operational layer underne
 
 See **[docs/dflow-arch.md](docs/dflow-arch.md)** for diagrams and invariants.
 
-## Colony: turning spot-like compute into completable work -- measured
+## Extension: Colony
 
-Colony is a benchmark layer on top of durableflow. It compares a naive retry runner against a durable runner under the identical seeded loss schedule and reports completion, cost, wall-clock, recoveries, and human interventions.
+**Turning spot-like compute into completable work -- measured.**
+
+Colony is a benchmark layer on top of DurableFlow. It compares a naive retry runner against a durable runner under the identical seeded loss schedule and reports completion, cost, wall-clock, recoveries, and human interventions.
 
 ```bash
-python examples/chaos_benchmark_demo.py
+python3 examples/chaos_benchmark_demo.py
+```
+
+Current hostile-profile mock result:
+
+```text
+=== RESULT mode=mock profile=hostile seed=1337 ===
+                  completion   cost     wall    recoveries  interventions
+naive                90%     $ 0.23     701s        --            --
+dflow-vast          100%     $ 0.23     689s        10             0
+
+completion delta: +10 pts     cost delta: +0.00   under identical loss schedule (seed 1337)
 ```
 
 This is not a claim that Vast instances are unreliable; it is a benchmark of whether long-running work can survive the class of failures that any spot-priced heterogeneous compute marketplace must handle.
 
 The workload is 20 small toy retrieval/model eval jobs, each with five durable stages: setup, data load, inference/eval shard, metrics write, and artifact upload. Mock mode requires no account. A gated live smoke path is available with `--live` and `VAST_API_KEY`.
 
-See **[docs/colony-methodology.md](docs/colony-methodology.md)** for the protocol, assumptions, and threats to validity.
+Start with **[colony/README.md](colony/README.md)**, then read **[docs/colony-methodology.md](docs/colony-methodology.md)** for the protocol, assumptions, and threats to validity.
+
+## Extension: Agent Readiness Pack
+
+**A deployment-readiness layer for agentic workflows.**
+
+The Agent Readiness Pack is the next extension track. Its spec defines how to wrap a reason-act-observe agent so every turn is checkpointed, every external write is idempotent and approval-gated, and six production failure modes are tested before deployment:
+
+- tool timeout
+- malformed tool output
+- prompt injection
+- context overflow
+- model fallback
+- crash after side effect
+
+The planned report is intentionally verdict-first: "ship" or "do not ship," the durability delta, and the single unsafe behavior that blocks deployment. The current repo contains the full implementation spec at **[readiness/docs/dflow-readiness-spec.md](readiness/docs/dflow-readiness-spec.md)**; the package implementation and demo are not yet present.
+
+Start with **[readiness/README.md](readiness/README.md)** for scope, status, and the build contract.
 
 ## Architecture notes: scaling LLM-powered assistants
 
@@ -87,6 +124,7 @@ durableflow/
     exercises.md        # hands-on tasks
     dflow-arch.md       # architecture diagrams
     dflow-spec.md       # implementation spec (contributors)
+    colony-methodology.md
   src/
     engine.py
     store.py
@@ -98,9 +136,22 @@ durableflow/
   examples/
     inbox_triage_demo.py
     crash_resume_demo.py
+    chaos_benchmark_demo.py
+    single_eviction_demo.py
+  colony/
+    README.md
+    colony-spec.md
+    benchmark.py
+    controller.py
+    provider.py
+  readiness/
+    README.md
+    docs/
+      dflow-readiness-spec.md
   data/
     mock_emails.json
     mock_calendar.json
+    chaos_profiles.json
   tests/
     test_*.py
 ```
@@ -121,7 +172,7 @@ Token counting is approximate: whitespace word count divided by 0.75. A producti
 
 ## What this is not
 
-This is not a production system. It is a proof of concept exploring the problem space. A production implementation would use Temporal or a comparable durable execution framework, vector search for context retrieval, real provider clients with rate-limit handling, and a proper secrets manager for API credentials.
+This is not a production system, a Temporal replacement, a distributed scheduler, or a general-purpose agent framework. It is a proof of concept exploring the operational primitives and measurement harnesses behind deployable agentic workflows. A production implementation would use Temporal or a comparable durable execution framework, vector search for context retrieval, real provider clients with rate-limit handling, and a proper secrets manager for API credentials.
 
 ## Contributing
 
