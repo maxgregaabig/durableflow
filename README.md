@@ -42,6 +42,20 @@ It is not another assistant framework. It is the small operational layer underne
 
 See **[docs/dflow-arch.md](docs/dflow-arch.md)** for diagrams and invariants.
 
+## Colony: turning spot-like compute into completable work -- measured
+
+Colony is a benchmark layer on top of durableflow. It compares a naive retry runner against a durable runner under the identical seeded loss schedule and reports completion, cost, wall-clock, recoveries, and human interventions.
+
+```bash
+python examples/chaos_benchmark_demo.py
+```
+
+This is not a claim that Vast instances are unreliable; it is a benchmark of whether long-running work can survive the class of failures that any spot-priced heterogeneous compute marketplace must handle.
+
+The workload is 20 small toy retrieval/model eval jobs, each with five durable stages: setup, data load, inference/eval shard, metrics write, and artifact upload. Mock mode requires no account. A gated live smoke path is available with `--live` and `VAST_API_KEY`.
+
+See **[docs/colony-methodology.md](docs/colony-methodology.md)** for the protocol, assumptions, and threats to validity.
+
 ## Architecture notes: scaling LLM-powered assistants
 
 The first version of an assistant usually succeeds because the workflow is narrow: one user request, one prompt, one model call, one response. The operational problems appear when that assistant starts running long-lived routines against real inboxes, calendars, CRMs, codebases, or ticket queues.

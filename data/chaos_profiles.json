@@ -1,0 +1,5 @@
+{
+  "calm": {"seed": 42, "duration_s": 640.0, "loss_rate": 0.008, "pool_size": 5},
+  "moderate": {"seed": 7331, "duration_s": 640.0, "loss_rate": 0.02, "pool_size": 5},
+  "hostile": {"seed": 1337, "duration_s": 640.0, "loss_rate": 0.08, "pool_size": 5}
+}

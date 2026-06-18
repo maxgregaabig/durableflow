@@ -33,6 +33,7 @@ dependencies = []
 
 [project.optional-dependencies]
 providers = ["anthropic>=0.30.0"]
+vast = []
 dev = ["pytest>=8.0"]
 
 [project.urls]
@@ -43,7 +44,7 @@ Issues = "https://github.com/marcospolanco/durableflow/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["src*"]
+include = ["src*", "colony*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

@@ -1,0 +1,28 @@
+{
+  "batch_id": "eval-batch",
+  "workload": "toy_retrieval_model_eval",
+  "jobs": [
+    {"job_id": "job-00", "shard": 0},
+    {"job_id": "job-01", "shard": 1},
+    {"job_id": "job-02", "shard": 2},
+    {"job_id": "job-03", "shard": 3},
+    {"job_id": "job-04", "shard": 4},
+    {"job_id": "job-05", "shard": 5},
+    {"job_id": "job-06", "shard": 6},
+    {"job_id": "job-07", "shard": 7},
+    {"job_id": "job-08", "shard": 8},
+    {"job_id": "job-09", "shard": 9},
+    {"job_id": "job-10", "shard": 10},
+    {"job_id": "job-11", "shard": 11},
+    {"job_id": "job-12", "shard": 12},
+    {"job_id": "job-13", "shard": 13},
+    {"job_id": "job-14", "shard": 14},
+    {"job_id": "job-15", "shard": 15},
+    {"job_id": "job-16", "shard": 16},
+    {"job_id": "job-17", "shard": 17},
+    {"job_id": "job-18", "shard": 18},
+    {"job_id": "job-19", "shard": 19}
+  ],
+  "stages": ["setup", "data_load", "inference_eval_shard", "metrics_write", "artifact_upload"],
+  "stage_durations_s": [5.0, 7.0, 13.0, 4.0, 3.0]
+}
