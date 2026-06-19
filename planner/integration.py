@@ -98,7 +98,7 @@ def _run_non_streaming(
                 success=True,
             )
             _record_completion(plan, outcome, request, constraints, store, budget_ledger)
-            return response or _empty_response(step.model_id)
+            return response or _empty_response(step.model_id), outcome
 
     outcome = PlanOutcome(
         plan_id=plan.id,

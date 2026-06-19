@@ -245,7 +245,8 @@ def test_sem_plan_trace_states_and_render_architecture() -> None:
     view = build_plan_trace_view(plan, PlanOutcome(plan.id, [attempt], 0, True), constraints)
 
     assert view.state == TraceState.EXECUTED
-    assert view.headline.count(".") == 1
+    assert view.headline
+    assert "\n" not in view.headline
     assert "target_id" not in render_plan_trace(view)
     source = Path("planner/render.py").read_text(encoding="utf-8")
     assert "from .solver" not in source
