@@ -1,0 +1,10 @@
+{
+  "id": "PLAN-004-budget-downgrade",
+  "expected_state": "executed",
+  "description": "Near-exhausted session budget downgrades the objective to cheapest.",
+  "constraints": {
+    "budget_id": "demo-budget",
+    "objective": "most_capable"
+  },
+  "flags": ["objective_downgraded_to_cheapest"]
+}

@@ -1,0 +1,9 @@
+{
+  "id": "PLAN-006-loading",
+  "expected_state": "loading",
+  "description": "Execution is in flight and no final outcome exists yet.",
+  "constraints": {
+    "objective": "cheapest"
+  },
+  "flags": ["in_flight"]
+}

@@ -12,7 +12,7 @@ DurableFlow now has three extension tracks:
 |-----------|--------|----------------------|
 | [Colony](colony/README.md) | Implemented benchmark | Durable execution can turn spot-like compute into completable long-running work, measured against a naive baseline under the same seeded loss schedule. |
 | [Agent Readiness Pack](readiness/README.md) | Implemented demo | A readiness harness shape for deciding whether an agent is deployable: durable turns, gated writes, failure injection, and a verdict-first report. |
-| [Target Planner](planner/planner-spec.md) | Draft spec | Budgeted, local-first target selection with verifiable escalation across local and cloud tiers. |
+| [Target Planner](planner/README.md) | Implemented MVP | Budgeted, local-first target selection with verifiable escalation across local and cloud tiers. |
 
 ## Quick start
 

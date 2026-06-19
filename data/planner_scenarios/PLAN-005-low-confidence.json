@@ -1,0 +1,9 @@
+{
+  "id": "PLAN-005-low-confidence",
+  "expected_state": "executed",
+  "description": "Cold-start target decision shows a low-confidence note.",
+  "constraints": {
+    "objective": "cheapest"
+  },
+  "low_confidence": true
+}

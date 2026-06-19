@@ -1,0 +1,9 @@
+{
+  "id": "PLAN-003-infeasible",
+  "expected_state": "infeasible",
+  "description": "Local-only privacy cannot be met because no local target is healthy.",
+  "constraints": {
+    "privacy": "local-only"
+  },
+  "infeasible_reason": "no_healthy_local_target"
+}

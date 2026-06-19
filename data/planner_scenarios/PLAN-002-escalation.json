@@ -1,0 +1,11 @@
+{
+  "id": "PLAN-002-escalation",
+  "expected_state": "escalated",
+  "description": "Local primary fails a JSON output check and escalates to frontier.",
+  "constraints": {
+    "output_check": {
+      "kind": "json"
+    },
+    "objective": "cheapest"
+  }
+}
