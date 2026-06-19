@@ -49,6 +49,12 @@ flowchart LR
 
 The engine orchestrates registered steps. Step bodies live on `InboxTriageWorkflow` and call selector, router, approval, and store through a shared dependencies dict (including telemetry injected by the engine).
 
+## Extension Pattern
+
+Sibling extension packages may use the fixed-step `WorkflowEngine` when their work naturally maps to registered steps, or they may wrap the lower-level `WorkflowStore` directly when their domain has its own execution loop. In both cases, extensions keep their schemas additive, store durable checkpoints through `WorkflowStore`, and use `TelemetryLogger.log_event()` for domain-specific events.
+
+Current implemented examples follow both shapes: Readiness registers agent turns as deterministic workflow steps, while Colony adds `colony_*` tables and checkpoints job stages through `WorkflowStore.save_checkpoint()`. Draft extensions such as Target Planner should follow the same boundary: no core table rewrites, no hidden in-memory state, and no new claim in this architecture document until the implementation exists.
+
 ## Module Dependencies
 
 ```mermaid

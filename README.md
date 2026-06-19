@@ -6,12 +6,13 @@ Most agent demos optimize for intelligence. DurableFlow is a small educational l
 
 In production, use established tools such as Temporal, LangGraph, LiteLLM, and LangSmith. This repo exists because those tools are intentionally large and capable; DurableFlow strips the core ideas down to local SQLite, standard Python, deterministic fixtures, and tests you can read in one sitting.
 
-DurableFlow now has two extension tracks:
+DurableFlow now has three extension tracks:
 
 | Extension | Status | What it demonstrates |
 |-----------|--------|----------------------|
 | [Colony](colony/README.md) | Implemented benchmark | Durable execution can turn spot-like compute into completable long-running work, measured against a naive baseline under the same seeded loss schedule. |
 | [Agent Readiness Pack](readiness/README.md) | Implemented demo | A readiness harness shape for deciding whether an agent is deployable: durable turns, gated writes, failure injection, and a verdict-first report. |
+| [Target Planner](planner/planner-spec.md) | Draft spec | Budgeted, local-first target selection with verifiable escalation across local and cloud tiers. |
 
 ## Quick start
 
@@ -119,6 +120,16 @@ The MCP path uses the official `mcp==1.13.1` client/server protocol when the opt
 
 Start with **[readiness/README.md](readiness/README.md)** for the implementation map, scenarios, and build contract. The full spec remains at **[readiness/docs/dflow-readiness-spec.md](readiness/docs/dflow-readiness-spec.md)**.
 
+## Extension: Target Planner
+
+**Budgeted, local-first target selection with verifiable escalation.**
+
+Target Planner is a draft sibling extension, implemented under `planner/`. It is scoped as an OpenAI-compatible proxy that accepts `"model": "auto"` plus declarative constraints, selects an ordered target plan under budget, privacy, latency, and tier constraints, then records each attempt as a durable outcome. Explicit model names bypass the target planner.
+
+The intended implementation reuses DurableFlow's SQLite-backed checkpoint store and cost-accounted model routing patterns, but adds target-planner-owned tables for targets, plan traces, target statistics, outcomes, and session budgets. Escalation is based on verifiable outcomes only: transport success, latency within budget, and optional caller-supplied output checks. It does not claim to predict answer quality.
+
+Read **[planner/planner-spec.md](planner/planner-spec.md)** for the draft contract and implementation gates.
+
 ## Architecture notes: scaling LLM-powered assistants
 
 The first version of an assistant usually succeeds because the workflow is narrow: one user request, one prompt, one model call, one response. The operational problems appear when that assistant starts running long-lived routines against real inboxes, calendars, CRMs, codebases, or ticket queues.
@@ -188,6 +199,8 @@ durableflow/
     render.py
     docs/
       dflow-readiness-spec.md
+  planner/
+    planner-spec.md
   mcp_server/
     legacy_crm.py
   data/
