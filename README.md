@@ -36,7 +36,7 @@ python examples/crash_resume_demo.py
 pytest tests/ -v
 ```
 
-After the demos, work through **[docs/exercises.md](docs/exercises.md)** — guided tasks for inspecting SQLite, forcing fallback, and extending the workflow.
+After the demos, work through **[docs/workshop/README.md](docs/workshop/README.md)** (full workshop curriculum) or **[docs/exercises.md](docs/exercises.md)** — guided tasks for inspecting SQLite, forcing fallback, and extending the workflow.
 
 ## What this is
 
