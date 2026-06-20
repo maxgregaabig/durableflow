@@ -63,6 +63,9 @@ run_demo() {
     inbox)
       python "$ROOT/examples/inbox_triage_demo.py"
       ;;
+    context)
+      python "$ROOT/examples/inbox_triage_context_demo.py"
+      ;;
     readiness)
       python "$ROOT/examples/readiness_demo.py"
       ;;
@@ -81,6 +84,7 @@ Usage: ./start.sh [command]
 Commands:
   crash   Run crash recovery demo (default)
   inbox   Run full inbox triage demo with interactive approval
+  context Run inbox triage with context audit trace
   readiness Run agent readiness before/after report
   mcp     Run gated write demo over the mock legacy CRM server
   test    Run the test suite

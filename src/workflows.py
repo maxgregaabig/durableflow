@@ -25,6 +25,7 @@ class InboxTriageWorkflow:
         approval_gate: ApprovalGate | None = None,
         policy: RoutingPolicy | None = None,
         data_dir: Path = DATA_DIR,
+        context_ledger: Any | None = None,
     ):
         self.store = store
         self.router = router or ModelRouter()
@@ -32,6 +33,7 @@ class InboxTriageWorkflow:
         self.approval_gate = approval_gate or ApprovalGate(store)
         self.policy = policy or default_policy()
         self.data_dir = data_dir
+        self.context_ledger = context_ledger
 
     def dependencies(self) -> dict[str, Any]:
         return {
@@ -41,6 +43,7 @@ class InboxTriageWorkflow:
             "approval_gate": self.approval_gate,
             "policy": self.policy,
             "data_dir": self.data_dir,
+            "context_ledger": self.context_ledger,
         }
 
     def register(self, engine: WorkflowEngine) -> None:
@@ -61,6 +64,33 @@ class InboxTriageWorkflow:
         emails = _load_json(self.data_dir / "mock_emails.json")
         email_id = step_data.get("email_id")
         incoming = next((email for email in emails if email["id"] == email_id), emails[0])
+        ledger = dependencies.get("context_ledger")
+        if ledger is not None:
+            artifact = ledger.record_artifact(
+                state.workflow_id,
+                artifact_role="source_artifact",
+                source=incoming["id"],
+                source_type="incoming_email",
+                content=json.dumps(incoming, sort_keys=True),
+                content_ref=f"mock_emails:{incoming['id']}",
+                token_count=estimate_tokens(f"{incoming['subject']} {incoming['body']}"),
+                metadata={"thread_id": incoming.get("thread_id")},
+            )
+            ledger.record_event(
+                state.workflow_id,
+                "ingest_email",
+                artifact.artifact_id,
+                "observed",
+                reason="incoming email loaded",
+            )
+            _log_context_event(
+                dependencies,
+                "context_artifact_observed",
+                state.workflow_id,
+                "ingest_email",
+                artifact.artifact_id,
+            )
+            incoming = incoming | {"context_artifact_id": artifact.artifact_id}
         return StepResult(
             "ingest_email",
             {"email": incoming},
@@ -80,10 +110,41 @@ class InboxTriageWorkflow:
         corpus = _context_items(emails, calendar, exclude_email_id=email["id"])
         query = f"{email['subject']} {email['body']}"
         selected = self.selector.select(query, corpus, token_budget=4096)
+        selected_payloads = [item.__dict__ for item in selected]
+        ledger = dependencies.get("context_ledger")
+        if ledger is not None:
+            for index, item in enumerate(selected):
+                source_type = _ledger_source_type(item.source_type)
+                artifact = ledger.record_artifact(
+                    state.workflow_id,
+                    artifact_role="source_artifact",
+                    source=item.id,
+                    source_type=source_type,
+                    content=item.content,
+                    content_ref=_content_ref(item),
+                    token_count=item.token_count,
+                    metadata={"timestamp": item.timestamp},
+                )
+                ledger.record_event(
+                    state.workflow_id,
+                    "select_context",
+                    artifact.artifact_id,
+                    "selected",
+                    reason="selected by context selector",
+                    metadata={"source_item_id": item.id, "rank": index},
+                )
+                _log_context_event(
+                    dependencies,
+                    "context_selected",
+                    state.workflow_id,
+                    "select_context",
+                    artifact.artifact_id,
+                )
+                selected_payloads[index]["artifact_id"] = artifact.artifact_id
         return StepResult(
             "select_context",
             {
-                "context": [item.__dict__ for item in selected],
+                "context": selected_payloads,
                 "token_count": sum(item.token_count for item in selected),
             },
             duration_ms=(time.perf_counter() - started) * 1000,
@@ -97,16 +158,36 @@ class InboxTriageWorkflow:
     ) -> StepResult:
         email = step_data["ingest_email"]["email"]
         context = step_data["select_context"]["context"][:5]
-        prompt = json.dumps({"email": email, "context": context}, sort_keys=True)
+        ledger = dependencies.get("context_ledger")
+        prompt_payload: dict[str, Any] = {"email": email, "context": context}
+        if ledger is not None:
+            mounted_artifact_ids = _mounted_artifact_ids(email, context)
+            prompt_payload["context_artifact_ids"] = mounted_artifact_ids
+            _record_consumed(dependencies, state.workflow_id, "triage_llm", mounted_artifact_ids)
+        prompt = json.dumps(prompt_payload, sort_keys=True)
         response = self.router.route(
             prompt=prompt,
             system="Classify this inbox item for triage as action_required, informational, or fyi.",
             policy=self.policy,
         )
         _log_fallback_if_needed(dependencies, state.workflow_id, "triage_llm", response)
-        classification = response.content.strip().split()[0].lower()
+        structured_response = _parse_model_json(response.content)
+        if structured_response is not None:
+            classification = str(structured_response.get("classification", "")).lower()
+        else:
+            classification = response.content.strip().split()[0].lower()
         if classification not in {"action_required", "informational", "fyi"}:
             classification = "action_required"
+        if ledger is not None:
+            _record_model_context(
+                dependencies,
+                state.workflow_id,
+                "triage_llm",
+                prompt,
+                response,
+                structured_response,
+                mounted_artifact_ids,
+            )
         return StepResult(
             "triage_llm",
             {
@@ -129,15 +210,41 @@ class InboxTriageWorkflow:
         if triage != "action_required":
             return StepResult("draft_reply", {"draft": None, "skipped": True}, duration_ms=0.0)
         email = step_data["ingest_email"]["email"]
+        context = step_data["select_context"]["context"][:5]
+        ledger = dependencies.get("context_ledger")
+        prompt_payload: dict[str, Any] = {"email": email}
+        if ledger is not None:
+            mounted_artifact_ids = _mounted_artifact_ids(email, context)
+            prompt_payload["context"] = context
+            prompt_payload["context_artifact_ids"] = mounted_artifact_ids
+            _record_consumed(dependencies, state.workflow_id, "draft_reply", mounted_artifact_ids)
+        else:
+            mounted_artifact_ids = []
         response = self.router.route(
-            prompt=json.dumps({"email": email}, sort_keys=True),
+            prompt=json.dumps(prompt_payload, sort_keys=True),
             system="Draft a concise, helpful reply in the user's voice.",
             policy=self.policy,
         )
         _log_fallback_if_needed(dependencies, state.workflow_id, "draft_reply", response)
+        structured_response = _parse_model_json(response.content)
+        draft = (
+            str(structured_response.get("draft"))
+            if structured_response is not None and structured_response.get("draft") is not None
+            else response.content
+        )
+        if ledger is not None:
+            _record_model_context(
+                dependencies,
+                state.workflow_id,
+                "draft_reply",
+                json.dumps(prompt_payload, sort_keys=True),
+                response,
+                structured_response,
+                mounted_artifact_ids,
+            )
         return StepResult(
             "draft_reply",
-            {"draft": response.content, "skipped": False},
+            {"draft": draft, "skipped": False},
             duration_ms=response.latency_ms,
             cost_usd=response.cost_usd,
             model_used=response.model_used,
@@ -276,3 +383,168 @@ def _log_fallback_if_needed(
         response.model_used,
         response.fallback_error or "provider fallback",
     )
+
+
+def _ledger_source_type(source_type: str) -> str:
+    if source_type == "email":
+        return "prior_email"
+    if source_type == "calendar":
+        return "calendar_event"
+    return source_type
+
+
+def _content_ref(item: ContextItem) -> str:
+    prefix = "mock_calendar" if item.source_type == "calendar" else "mock_emails"
+    return f"{prefix}:{item.id}"
+
+
+def _mounted_artifact_ids(email: dict[str, Any], context: list[dict[str, Any]]) -> list[str]:
+    ids: list[str] = []
+    incoming_id = email.get("context_artifact_id")
+    if isinstance(incoming_id, str):
+        ids.append(incoming_id)
+    for item in context:
+        artifact_id = item.get("artifact_id")
+        if isinstance(artifact_id, str):
+            ids.append(artifact_id)
+    return ids
+
+
+def _record_consumed(
+    dependencies: dict[str, Any],
+    workflow_id: str,
+    step_name: str,
+    artifact_ids: list[str],
+) -> None:
+    ledger = dependencies.get("context_ledger")
+    for artifact_id in artifact_ids:
+        ledger.record_event(
+            workflow_id,
+            step_name,
+            artifact_id,
+            "consumed",
+            reason="mounted into model prompt",
+        )
+        _log_context_event(dependencies, "context_consumed", workflow_id, step_name, artifact_id)
+
+
+def _record_model_context(
+    dependencies: dict[str, Any],
+    workflow_id: str,
+    step_name: str,
+    prompt: str,
+    response: Any,
+    structured_response: dict[str, Any] | None,
+    mounted_artifact_ids: list[str],
+) -> None:
+    ledger = dependencies.get("context_ledger")
+    prompt_artifact = ledger.record_artifact(
+        workflow_id,
+        artifact_role="prompt_artifact",
+        source=f"{step_name}:prompt",
+        source_type="prompt",
+        content=prompt,
+        content_ref=f"workflow:{workflow_id}:{step_name}:prompt",
+        token_count=response.input_tokens,
+        metadata={},
+    )
+    response_artifact = ledger.record_artifact(
+        workflow_id,
+        artifact_role="response_artifact",
+        source=f"{step_name}:response",
+        source_type="model_response",
+        content=response.content,
+        content_ref=f"workflow:{workflow_id}:{step_name}:response",
+        token_count=response.output_tokens,
+        metadata={},
+    )
+    ledger.record_event(workflow_id, step_name, prompt_artifact.artifact_id, "consumed")
+    ledger.record_event(workflow_id, step_name, response_artifact.artifact_id, "observed")
+    decision = ledger.record_decision(
+        workflow_id,
+        step_name,
+        step_result_id=None,
+        prompt=prompt,
+        response=response.content,
+        model_used=response.model_used,
+        input_tokens=response.input_tokens,
+        output_tokens=response.output_tokens,
+        cost_usd=response.cost_usd,
+    )
+    _log_context_event(
+        dependencies,
+        "context_decision_recorded",
+        workflow_id,
+        step_name,
+        decision_id=decision.decision_id,
+    )
+    influential_ids = _explicit_influential_ids(structured_response, mounted_artifact_ids)
+    for artifact_id in influential_ids:
+        ledger.record_lineage(
+            decision.decision_id,
+            artifact_id,
+            _influence_type(structured_response),
+            1.0,
+            evidence_ref=f"model_response:{decision.response_digest}:influential_artifact_ids",
+        )
+        _log_context_event(
+            dependencies,
+            "context_lineage_recorded",
+            workflow_id,
+            step_name,
+            artifact_id,
+            decision.decision_id,
+        )
+
+
+def _parse_model_json(content: str) -> dict[str, Any] | None:
+    try:
+        parsed = json.loads(content)
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _explicit_influential_ids(
+    structured_response: dict[str, Any] | None,
+    mounted_artifact_ids: list[str],
+) -> list[str]:
+    if structured_response is None:
+        return []
+    raw_ids = structured_response.get("influential_artifact_ids")
+    if not isinstance(raw_ids, list):
+        return []
+    mounted = set(mounted_artifact_ids)
+    return [
+        artifact_id
+        for artifact_id in raw_ids
+        if isinstance(artifact_id, str) and artifact_id in mounted
+    ]
+
+
+def _influence_type(structured_response: dict[str, Any] | None) -> str:
+    if structured_response is None:
+        return "explicit_model_attribution"
+    attribution_mode = structured_response.get("attribution_mode")
+    if attribution_mode == "deterministic_fixture":
+        return "deterministic_fixture_attribution"
+    return "explicit_model_attribution"
+
+
+def _log_context_event(
+    dependencies: dict[str, Any],
+    event_type: str,
+    workflow_id: str,
+    step_name: str,
+    artifact_id: str | None = None,
+    decision_id: str | None = None,
+) -> None:
+    telemetry = dependencies.get("telemetry")
+    if telemetry is None:
+        return
+    metadata: dict[str, Any] = {}
+    if artifact_id is not None:
+        metadata["artifact_id"] = artifact_id
+    if decision_id is not None:
+        metadata["decision_id"] = decision_id
+    telemetry.log_event(event_type, workflow_id, step_name, metadata=metadata)

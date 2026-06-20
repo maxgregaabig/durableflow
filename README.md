@@ -6,12 +6,13 @@ Most agent demos optimize for intelligence. DurableFlow is a small educational l
 
 In production, use established tools such as Temporal, LangGraph, LiteLLM, and LangSmith. This repo exists because those tools are intentionally large and capable; DurableFlow strips the core ideas down to local SQLite, standard Python, deterministic fixtures, and tests you can read in one sitting.
 
-DurableFlow now has three extension tracks:
+DurableFlow now has four extension tracks:
 
 | Extension | Status | What it demonstrates |
 |-----------|--------|----------------------|
 | [Colony](colony/README.md) | Implemented benchmark | Durable execution can turn spot-like compute into completable long-running work, measured against a naive baseline under the same seeded loss schedule. |
 | [Agent Readiness Pack](readiness/README.md) | Implemented demo | A readiness harness shape for deciding whether an agent is deployable: durable turns, gated writes, failure injection, and a verdict-first report. |
+| [Context](context/README.md) | Implemented MVP | Durable information lineage: what was observed, selected, consumed by model steps, and explicitly credited as influential. |
 | [Target Planner](planner/planner-spec.md) | Draft spec | Budgeted, local-first target selection with verifiable escalation across local and cloud tiers. |
 
 ## Quick start
@@ -24,6 +25,7 @@ cd durableflow
 ./start.sh crash     # crash recovery demo (start here)
 ./start.sh test      # full test suite
 ./start.sh inbox     # interactive approval demo
+./start.sh context   # inbox triage plus context audit trace
 ./start.sh readiness # agent readiness before/after report
 ./start.sh mcp       # gated write over MCP CRM server
 ```
@@ -129,6 +131,21 @@ Target Planner is a draft sibling extension, implemented under `planner/`. It is
 The intended implementation reuses DurableFlow's SQLite-backed checkpoint store and cost-accounted model routing patterns, but adds target-planner-owned tables for targets, plan traces, target statistics, outcomes, and session budgets. Escalation is based on verifiable outcomes only: transport success, latency within budget, and optional caller-supplied output checks. It does not claim to predict answer quality.
 
 Read **[planner/planner-spec.md](planner/planner-spec.md)** for the draft contract and implementation gates.
+
+## Extension: Context
+
+**Durable information state alongside durable execution state.**
+
+Context adds a small ledger for the inbox triage workflow so an operator can see what information was observed, selected, consumed by model steps, and explicitly credited as influential by the mock model.
+
+```bash
+python3 examples/inbox_triage_context_demo.py
+python3 -m context.cli audit --db examples/inbox_triage_context_demo.sqlite --workflow-id wf-context-demo
+```
+
+The ledger stores digests and source references by default, not raw email bodies, prompts, or model responses. v0.1 is deliberately limited to lineage; trust, freshness, contradiction checks, supersession, and replay are roadmap capabilities.
+
+Start with **[context/README.md](context/README.md)** for the product-level explanation, then read **[docs/context-extension.md](docs/context-extension.md)** for the schema, audit contract, privacy boundary, and before/after comparison.
 
 ## Architecture notes: scaling LLM-powered assistants
 

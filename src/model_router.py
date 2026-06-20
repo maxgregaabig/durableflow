@@ -133,6 +133,25 @@ class ModelRouter:
     def _mock_response(self, prompt: str, system: str) -> str:
         lowered = (system + "\n" + prompt).lower()
         if "classify" in lowered or "triage" in lowered:
+            structured = self._structured_prompt(prompt)
+            if structured is not None and structured.get("context_artifact_ids"):
+                email_text = self._extract_email_text(prompt).lower()
+                classification = (
+                    "action_required"
+                    if any(
+                        word in email_text
+                        for word in ["need", "review", "approval", "reply", "feedback", "please"]
+                    )
+                    else "informational"
+                )
+                return json.dumps(
+                    {
+                        "attribution_mode": "deterministic_fixture",
+                        "classification": classification,
+                        "influential_artifact_ids": self._influential_artifact_ids(structured),
+                    },
+                    sort_keys=True,
+                )
             email_text = self._extract_email_text(prompt).lower()
             if any(
                 word in email_text
@@ -141,10 +160,21 @@ class ModelRouter:
                 return "action_required"
             return "informational"
         if "draft" in lowered:
-            return (
+            draft = (
                 "Hi Sarah,\n\nThanks for sending this over. I can review the deck today "
                 "and send concise feedback before Thursday.\n\nBest,\nMarcos"
             )
+            structured = self._structured_prompt(prompt)
+            if structured is not None and structured.get("context_artifact_ids"):
+                return json.dumps(
+                    {
+                        "attribution_mode": "deterministic_fixture",
+                        "draft": draft,
+                        "influential_artifact_ids": self._influential_artifact_ids(structured),
+                    },
+                    sort_keys=True,
+                )
+            return draft
         return "acknowledged"
 
     def _extract_email_text(self, prompt: str) -> str:
@@ -156,6 +186,38 @@ class ModelRouter:
         if not isinstance(email, dict):
             return prompt
         return f"{email.get('subject', '')} {email.get('body', '')}"
+
+    def _structured_prompt(self, prompt: str) -> dict | None:
+        try:
+            payload = json.loads(prompt)
+        except json.JSONDecodeError:
+            return None
+        return payload if isinstance(payload, dict) else None
+
+    def _influential_artifact_ids(self, payload: dict) -> list[str]:
+        candidates = payload.get("context", [])
+        if not isinstance(candidates, list):
+            return []
+        by_source_id: dict[str, str] = {}
+        for item in candidates:
+            if not isinstance(item, dict):
+                continue
+            artifact_id = item.get("artifact_id")
+            source_id = item.get("id")
+            if isinstance(source_id, str) and isinstance(artifact_id, str):
+                by_source_id[source_id] = artifact_id
+        fixture_order = ["cal-001", "email-012"]
+        fixture_matches = [
+            by_source_id[source_id]
+            for source_id in fixture_order
+            if source_id in by_source_id
+        ]
+        if fixture_matches:
+            return fixture_matches[:2]
+        artifact_ids = payload.get("context_artifact_ids", [])
+        if isinstance(artifact_ids, list):
+            return [artifact_id for artifact_id in artifact_ids if isinstance(artifact_id, str)][:2]
+        return []
 
     def _estimate_tokens(self, text: str) -> int:
         return max(1, int(len(text.split()) / 0.75))

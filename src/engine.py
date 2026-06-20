@@ -221,6 +221,7 @@ class WorkflowEngine:
                     timestamp=result.timestamp,
                 )
             state = self.store.save_checkpoint(workflow_id, index, result)
+            self._link_context_decisions(workflow_id, name, index)
             self.telemetry.log_step_complete(
                 workflow_id,
                 name,
@@ -233,3 +234,14 @@ class WorkflowEngine:
         self.store.update_status(workflow_id, WorkflowStatus.COMPLETED)
         self.telemetry.log_workflow_complete(workflow_id)
         return self.store.load_workflow(workflow_id)
+
+    def _link_context_decisions(
+        self,
+        workflow_id: str,
+        step_name: str,
+        step_index: int,
+    ) -> None:
+        ledger = self.dependencies.get("context_ledger")
+        if ledger is None or not hasattr(ledger, "link_decisions_to_step_result"):
+            return
+        ledger.link_decisions_to_step_result(workflow_id, step_name, step_index)
