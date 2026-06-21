@@ -384,3 +384,89 @@ def test_ctx_led_assembly_004_retrieved_event_unknown_key_rejected(tmp_path) -> 
             "retrieved",
             metadata={"retrieval_method": "bm25", "unknown_field": "value"},
         )
+
+
+def test_ctx_led_assembly_005_retrieved_event_invalid_rank_position(tmp_path) -> None:
+    """retrieved event with zero rank_position is rejected."""
+    store = WorkflowStore(tmp_path / "context.sqlite")
+    state = store.create_workflow("test")
+    ledger = ContextLedger.from_store(store)
+
+    artifact = ledger.record_artifact(
+        state.workflow_id,
+        "source_artifact",
+        "test-source",
+        "test_type",
+        None,
+        "test-ref",
+        100,
+    )
+    with pytest.raises(ValueError, match="failed type validation"):
+        ledger.record_event(
+            state.workflow_id,
+            "test_step",
+            artifact.artifact_id,
+            "retrieved",
+            metadata={"retrieval_method": "bm25", "rank_position": 0},
+        )
+
+
+def test_ctx_led_assembly_006_retrieved_event_negative_rank_rejected(tmp_path) -> None:
+    """retrieved event with negative rank_position is rejected."""
+    store = WorkflowStore(tmp_path / "context.sqlite")
+    state = store.create_workflow("test")
+    ledger = ContextLedger.from_store(store)
+
+    artifact = ledger.record_artifact(
+        state.workflow_id,
+        "source_artifact",
+        "test-source",
+        "test_type",
+        None,
+        "test-ref",
+        100,
+    )
+    with pytest.raises(ValueError, match="failed type validation"):
+        ledger.record_event(
+            state.workflow_id,
+            "test_step",
+            artifact.artifact_id,
+            "retrieved",
+            metadata={"retrieval_method": "bm25", "rank_position": -1},
+        )
+
+
+def test_ctx_led_assembly_007_type_validation_int_float_accepted(tmp_path) -> None:
+    """retrieval_score accepts both int and float."""
+    store = WorkflowStore(tmp_path / "context.sqlite")
+    state = store.create_workflow("test")
+    ledger = ContextLedger.from_store(store)
+
+    artifact = ledger.record_artifact(
+        state.workflow_id,
+        "source_artifact",
+        "test-source",
+        "test_type",
+        None,
+        "test-ref",
+        100,
+    )
+    # Test int score
+    event_int = ledger.record_event(
+        state.workflow_id,
+        "test_step",
+        artifact.artifact_id,
+        "retrieved",
+        metadata={"retrieval_method": "bm25", "retrieval_score": 82},
+    )
+    assert event_int.metadata["retrieval_score"] == 82
+
+    # Test float score
+    event_float = ledger.record_event(
+        state.workflow_id,
+        "test_step_2",
+        artifact.artifact_id,
+        "retrieved",
+        metadata={"retrieval_method": "bm25", "retrieval_score": 0.82},
+    )
+    assert event_float.metadata["retrieval_score"] == 0.82
