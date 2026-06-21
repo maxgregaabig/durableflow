@@ -470,3 +470,104 @@ def test_ctx_led_assembly_007_type_validation_int_float_accepted(tmp_path) -> No
         metadata={"retrieval_method": "bm25", "retrieval_score": 0.82},
     )
     assert event_float.metadata["retrieval_score"] == 0.82
+
+
+def test_ctx_led_assembly_008_rejected_event_valid_metadata(tmp_path) -> None:
+    """rejected event with valid metadata is accepted."""
+    store = WorkflowStore(tmp_path / "context.sqlite")
+    state = store.create_workflow("test")
+    ledger = ContextLedger.from_store(store)
+
+    artifact = ledger.record_artifact(
+        state.workflow_id,
+        "source_artifact",
+        "test-source",
+        "test_type",
+        None,
+        "test-ref",
+        100,
+    )
+    event = ledger.record_event(
+        state.workflow_id,
+        "test_step",
+        artifact.artifact_id,
+        "rejected",
+        metadata={"rejection_reason": "token_budget", "retrieval_score": 0.12, "rank_position": 37},
+    )
+    assert event.event_type == "rejected"
+    assert event.metadata["rejection_reason"] == "token_budget"
+
+
+def test_ctx_led_assembly_009_rejected_event_missing_required_key(tmp_path) -> None:
+    """rejected event without rejection_reason is rejected."""
+    store = WorkflowStore(tmp_path / "context.sqlite")
+    state = store.create_workflow("test")
+    ledger = ContextLedger.from_store(store)
+
+    artifact = ledger.record_artifact(
+        state.workflow_id,
+        "source_artifact",
+        "test-source",
+        "test_type",
+        None,
+        "test-ref",
+        100,
+    )
+    with pytest.raises(ValueError, match="metadata missing required keys"):
+        ledger.record_event(
+            state.workflow_id,
+            "test_step",
+            artifact.artifact_id,
+            "rejected",
+            metadata={"retrieval_score": 0.12},
+        )
+
+
+def test_ctx_led_assembly_010_rejected_event_empty_string_rejected(tmp_path) -> None:
+    """rejected event with empty rejection_reason is rejected."""
+    store = WorkflowStore(tmp_path / "context.sqlite")
+    state = store.create_workflow("test")
+    ledger = ContextLedger.from_store(store)
+
+    artifact = ledger.record_artifact(
+        state.workflow_id,
+        "source_artifact",
+        "test-source",
+        "test_type",
+        None,
+        "test-ref",
+        100,
+    )
+    with pytest.raises(ValueError, match="failed type validation"):
+        ledger.record_event(
+            state.workflow_id,
+            "test_step",
+            artifact.artifact_id,
+            "rejected",
+            metadata={"rejection_reason": ""},
+        )
+
+
+def test_ctx_led_assembly_011_rejected_event_unknown_key_rejected(tmp_path) -> None:
+    """rejected event with unknown key is rejected."""
+    store = WorkflowStore(tmp_path / "context.sqlite")
+    state = store.create_workflow("test")
+    ledger = ContextLedger.from_store(store)
+
+    artifact = ledger.record_artifact(
+        state.workflow_id,
+        "source_artifact",
+        "test-source",
+        "test_type",
+        None,
+        "test-ref",
+        100,
+    )
+    with pytest.raises(ValueError, match="metadata contains unknown keys"):
+        ledger.record_event(
+            state.workflow_id,
+            "test_step",
+            artifact.artifact_id,
+            "rejected",
+            metadata={"rejection_reason": "token_budget", "unknown_field": "value"},
+        )
