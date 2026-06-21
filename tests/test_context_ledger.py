@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import pytest
 
 from context import ContextLedger
 from context.audit_view import build_context_audit_view, render_context_audit
@@ -282,3 +283,104 @@ def test_ctx_res_001_engine_resume_after_select_context_failure_does_not_duplica
     selected_events = [event for event in audit.events if event.event_type == "selected"]
     assert len(selected_events) == len({event.artifact_id for event in selected_events})
     assert state.current_step >= 2
+
+
+def test_ctx_led_assembly_001_retrieved_event_valid_metadata(tmp_path) -> None:
+    """retrieved event with valid metadata is accepted."""
+    store = WorkflowStore(tmp_path / "context.sqlite")
+    state = store.create_workflow("test")
+    ledger = ContextLedger.from_store(store)
+
+    artifact = ledger.record_artifact(
+        state.workflow_id,
+        "source_artifact",
+        "test-source",
+        "test_type",
+        None,
+        "test-ref",
+        100,
+    )
+    event = ledger.record_event(
+        state.workflow_id,
+        "test_step",
+        artifact.artifact_id,
+        "retrieved",
+        metadata={"retrieval_method": "bm25", "retrieval_score": 0.82, "rank_position": 4},
+    )
+    assert event.event_type == "retrieved"
+    assert event.metadata["retrieval_method"] == "bm25"
+
+
+def test_ctx_led_assembly_002_retrieved_event_missing_required_key(tmp_path) -> None:
+    """retrieved event without retrieval_method is rejected."""
+    store = WorkflowStore(tmp_path / "context.sqlite")
+    state = store.create_workflow("test")
+    ledger = ContextLedger.from_store(store)
+
+    artifact = ledger.record_artifact(
+        state.workflow_id,
+        "source_artifact",
+        "test-source",
+        "test_type",
+        None,
+        "test-ref",
+        100,
+    )
+    with pytest.raises(ValueError, match="metadata missing required keys"):
+        ledger.record_event(
+            state.workflow_id,
+            "test_step",
+            artifact.artifact_id,
+            "retrieved",
+            metadata={"retrieval_score": 0.82},
+        )
+
+
+def test_ctx_led_assembly_003_retrieved_event_empty_string_rejected(tmp_path) -> None:
+    """retrieved event with empty retrieval_method is rejected."""
+    store = WorkflowStore(tmp_path / "context.sqlite")
+    state = store.create_workflow("test")
+    ledger = ContextLedger.from_store(store)
+
+    artifact = ledger.record_artifact(
+        state.workflow_id,
+        "source_artifact",
+        "test-source",
+        "test_type",
+        None,
+        "test-ref",
+        100,
+    )
+    with pytest.raises(ValueError, match="failed type validation"):
+        ledger.record_event(
+            state.workflow_id,
+            "test_step",
+            artifact.artifact_id,
+            "retrieved",
+            metadata={"retrieval_method": ""},
+        )
+
+
+def test_ctx_led_assembly_004_retrieved_event_unknown_key_rejected(tmp_path) -> None:
+    """retrieved event with unknown key is rejected."""
+    store = WorkflowStore(tmp_path / "context.sqlite")
+    state = store.create_workflow("test")
+    ledger = ContextLedger.from_store(store)
+
+    artifact = ledger.record_artifact(
+        state.workflow_id,
+        "source_artifact",
+        "test-source",
+        "test_type",
+        None,
+        "test-ref",
+        100,
+    )
+    with pytest.raises(ValueError, match="metadata contains unknown keys"):
+        ledger.record_event(
+            state.workflow_id,
+            "test_step",
+            artifact.artifact_id,
+            "retrieved",
+            metadata={"retrieval_method": "bm25", "unknown_field": "value"},
+        )
