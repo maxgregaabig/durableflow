@@ -366,6 +366,26 @@ class ContextLedger:
             init_context_schema(conn)
 
 
+def _validate_event_metadata(event_type: str, metadata: dict[str, Any]) -> None:
+    if event_type not in METADATA_CONTRACTS:
+        return
+    contract = METADATA_CONTRACTS[event_type]
+    allowed_keys = set(contract["required"]) | set(contract["optional"])
+
+    unknown = set(metadata.keys()) - allowed_keys
+    if unknown:
+        raise ValueError(f"metadata contains unknown keys: {unknown}")
+
+    missing = set(contract["required"]) - set(metadata.keys())
+    if missing:
+        raise ValueError(f"metadata missing required keys: {missing}")
+
+    for key, value in metadata.items():
+        if key in TYPE_VALIDATORS:
+            if not TYPE_VALIDATORS[key](value):
+                raise ValueError(f"metadata key '{key}' failed type validation")
+
+
 def _validate(name: str, value: str, allowed: set[str]) -> None:
     if value not in allowed:
         raise ValueError(f"invalid {name}: {value}")
