@@ -14,7 +14,7 @@ from .schema import init_context_schema
 
 
 ARTIFACT_ROLES = {"source_artifact", "prompt_artifact", "response_artifact"}
-ARTIFACT_EVENTS = {"observed", "selected", "consumed"}
+ARTIFACT_EVENTS = {"observed", "retrieved", "selected", "rejected", "consumed"}
 SYSTEM_EVENTS = {"decision_recorded", "lineage_recorded"}
 EVENT_SCOPES = {"artifact", "system"}
 INFLUENCE_TYPES = {"explicit_model_attribution", "deterministic_fixture_attribution"}
