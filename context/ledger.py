@@ -19,6 +19,25 @@ SYSTEM_EVENTS = {"decision_recorded", "lineage_recorded"}
 EVENT_SCOPES = {"artifact", "system"}
 INFLUENCE_TYPES = {"explicit_model_attribution", "deterministic_fixture_attribution"}
 
+METADATA_CONTRACTS = {
+    "retrieved": {
+        "required": ["retrieval_method"],
+        "optional": ["retrieval_score", "rank_position", "retrieval_query_digest"],
+    },
+    "rejected": {
+        "required": ["rejection_reason"],
+        "optional": ["retrieval_method", "retrieval_score", "rank_position"],
+    },
+}
+
+TYPE_VALIDATORS = {
+    "retrieval_method": lambda v: isinstance(v, str) and v,
+    "rejection_reason": lambda v: isinstance(v, str) and v,
+    "retrieval_score": lambda v: isinstance(v, (int, float)),
+    "rank_position": lambda v: isinstance(v, int) and v >= 1,
+    "retrieval_query_digest": lambda v: isinstance(v, str) and v,
+}
+
 
 class ContextLedger:
     def __init__(self, db_path: str | Path):
