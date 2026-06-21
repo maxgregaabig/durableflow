@@ -56,6 +56,7 @@ class ContextAuditView:
     workflow_id: str
     headline: str
     lineage_summary: str
+    assembly_summary: str
     steps: list[ContextAuditStepView]
     claim_boundary_footer: str
     roadmap_notice: str
@@ -146,10 +147,12 @@ def build_context_audit_view(audit: ContextAudit) -> ContextAuditView:
     lineage_summary = (
         "Knowledge trail shows observed, selected, consumed, and explicitly credited artifacts."
     )
+    assembly_summary = ""
     return ContextAuditView(
         workflow_id=audit.workflow_id,
         headline=headline,
         lineage_summary=lineage_summary,
+        assembly_summary=assembly_summary,
         steps=steps,
         claim_boundary_footer=BOUNDARY_FOOTER,
         roadmap_notice=ROADMAP_NOTICE,
