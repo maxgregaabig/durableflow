@@ -571,3 +571,178 @@ def test_ctx_led_assembly_011_rejected_event_unknown_key_rejected(tmp_path) -> N
             "rejected",
             metadata={"rejection_reason": "token_budget", "unknown_field": "value"},
         )
+
+
+def test_ctx_led_assembly_020_audit_counts_includes_retrieved_rejected(tmp_path) -> None:
+    """Audit counts include retrieved and rejected events."""
+    store = WorkflowStore(tmp_path / "context.sqlite")
+    state = store.create_workflow("test")
+    ledger = ContextLedger.from_store(store)
+
+    artifact = ledger.record_artifact(
+        state.workflow_id,
+        "source_artifact",
+        "test-source",
+        "test_type",
+        None,
+        "test-ref",
+        100,
+    )
+    ledger.record_event(
+        state.workflow_id,
+        "test_step",
+        artifact.artifact_id,
+        "observed",
+    )
+    ledger.record_event(
+        state.workflow_id,
+        "test_step",
+        artifact.artifact_id,
+        "retrieved",
+        metadata={"retrieval_method": "bm25"},
+    )
+    ledger.record_event(
+        state.workflow_id,
+        "test_step",
+        artifact.artifact_id,
+        "selected",
+    )
+
+    audit = ledger.audit_workflow(state.workflow_id)
+    assert audit.observed_count == 1
+    assert audit.retrieved_count == 1
+    assert audit.selected_count == 1
+    assert audit.rejected_count == 0
+
+
+def test_ctx_led_assembly_021_audit_counts_unique_artifacts(tmp_path) -> None:
+    """Audit counts deduplicate artifacts by (workflow_id, step_name, artifact_id, event_type)."""
+    store = WorkflowStore(tmp_path / "context.sqlite")
+    state = store.create_workflow("test")
+    ledger = ContextLedger.from_store(store)
+
+    artifact = ledger.record_artifact(
+        state.workflow_id,
+        "source_artifact",
+        "test-source",
+        "test_type",
+        None,
+        "test-ref",
+        100,
+    )
+
+    # Record retrieved event twice - should be deduplicated
+    event1 = ledger.record_event(
+        state.workflow_id,
+        "test_step",
+        artifact.artifact_id,
+        "retrieved",
+        metadata={"retrieval_method": "bm25"},
+    )
+    event2 = ledger.record_event(
+        state.workflow_id,
+        "test_step",
+        artifact.artifact_id,
+        "retrieved",
+        metadata={"retrieval_method": "bm25"},
+    )
+
+    # Same event should be returned (idempotency)
+    assert event1.event_id == event2.event_id
+
+    audit = ledger.audit_workflow(state.workflow_id)
+    assert audit.retrieved_count == 1  # Not 2
+
+
+def test_ctx_led_assembly_022_audit_counts_cross_step_deduplication(tmp_path) -> None:
+    """Same artifact retrieved in different steps counts separately."""
+    store = WorkflowStore(tmp_path / "context.sqlite")
+    state = store.create_workflow("test")
+    ledger = ContextLedger.from_store(store)
+
+    artifact = ledger.record_artifact(
+        state.workflow_id,
+        "source_artifact",
+        "test-source",
+        "test_type",
+        None,
+        "test-ref",
+        100,
+    )
+
+    # Same artifact, retrieved in different steps
+    ledger.record_event(
+        state.workflow_id,
+        "step_a",
+        artifact.artifact_id,
+        "retrieved",
+        metadata={"retrieval_method": "bm25"},
+    )
+    ledger.record_event(
+        state.workflow_id,
+        "step_b",
+        artifact.artifact_id,
+        "retrieved",
+        metadata={"retrieval_method": "hybrid"},
+    )
+
+    audit = ledger.audit_workflow(state.workflow_id)
+    # Deduplication is per (workflow_id, step_name, artifact_id, event_type)
+    # So these count as 2 unique retrieved events
+    assert audit.retrieved_count == 2
+
+
+def test_ctx_led_assembly_023_audit_counts_multiple_artifacts(tmp_path) -> None:
+    """Audit counts correctly sum multiple artifacts."""
+    store = WorkflowStore(tmp_path / "context.sqlite")
+    state = store.create_workflow("test")
+    ledger = ContextLedger.from_store(store)
+
+    artifacts = []
+    for i in range(3):
+        artifact = ledger.record_artifact(
+            state.workflow_id,
+            "source_artifact",
+            f"test-source-{i}",
+            "test_type",
+            None,
+            f"test-ref-{i}",
+            100,
+        )
+        artifacts.append(artifact)
+
+    # All retrieved
+    for artifact in artifacts:
+        ledger.record_event(
+            state.workflow_id,
+            "test_step",
+            artifact.artifact_id,
+            "retrieved",
+            metadata={"retrieval_method": "bm25"},
+        )
+
+    # First two selected, third rejected
+    ledger.record_event(
+        state.workflow_id,
+        "test_step",
+        artifacts[0].artifact_id,
+        "selected",
+    )
+    ledger.record_event(
+        state.workflow_id,
+        "test_step",
+        artifacts[1].artifact_id,
+        "selected",
+    )
+    ledger.record_event(
+        state.workflow_id,
+        "test_step",
+        artifacts[2].artifact_id,
+        "rejected",
+        metadata={"rejection_reason": "token_budget"},
+    )
+
+    audit = ledger.audit_workflow(state.workflow_id)
+    assert audit.retrieved_count == 3
+    assert audit.selected_count == 2
+    assert audit.rejected_count == 1
