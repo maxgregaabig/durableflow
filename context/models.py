@@ -81,7 +81,8 @@ class ContextAudit:
 
     @property
     def observed_count(self) -> int:
-        return _count_events(self.events, "observed")
+        """Total artifacts that entered the workflow's information universe."""
+        return len(self.artifacts)
 
     @property
     def retrieved_count(self) -> int:

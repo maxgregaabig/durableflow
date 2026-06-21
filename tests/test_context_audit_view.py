@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import re
 import subprocess
 import sys
 from typing import get_type_hints
@@ -134,3 +135,145 @@ def test_sem_ctx_002_005_006_cli_boundary_and_privacy(tmp_path) -> None:
     assert "trust policy" in result.stdout
     assert "sensitive Q3 board deck raw body" not in result.stdout
     assert "context_artifacts" not in result.stdout
+
+
+def test_ctx_audit_assembly_001_summary_in_view(tmp_path) -> None:
+    """Assembly summary includes observed, retrieved, selected, rejected counts."""
+    store = WorkflowStore(tmp_path / "context.sqlite")
+    state = store.create_workflow("test")
+    ledger = ContextLedger.from_store(store)
+
+    # Create 5 artifacts
+    for i in range(5):
+        ledger.record_artifact(
+            state.workflow_id,
+            "source_artifact",
+            f"source-{i}",
+            "test",
+            None,
+            f"ref-{i}",
+            100,
+        )
+
+    # Get artifacts from ledger
+    from context.ledger import _artifact_from_row
+    with ledger.connect() as conn:
+        artifacts = [
+            _artifact_from_row(row)
+            for row in conn.execute(
+                "SELECT * FROM context_artifacts WHERE workflow_id = ?",
+                (state.workflow_id,),
+            ).fetchall()
+        ]
+
+    # Record events: 3 retrieved, 2 selected, 1 rejected
+    for artifact in artifacts[:3]:
+        ledger.record_event(
+            state.workflow_id,
+            "test_step",
+            artifact.artifact_id,
+            "retrieved",
+            metadata={"retrieval_method": "bm25"},
+        )
+
+    for artifact in artifacts[:2]:
+        ledger.record_event(
+            state.workflow_id,
+            "test_step",
+            artifact.artifact_id,
+            "selected",
+        )
+
+    ledger.record_event(
+        state.workflow_id,
+        "test_step",
+        artifacts[2].artifact_id,
+        "rejected",
+        metadata={"rejection_reason": "low_score"},
+    )
+
+    audit = ledger.audit_workflow(state.workflow_id)
+    view = build_context_audit_view(audit)
+
+    assert "Assembly: 5 observed, 3 retrieved, 2 selected, 1 rejected" in view.assembly_summary
+
+
+def test_ctx_audit_assembly_002_renderer_includes_summary(tmp_path) -> None:
+    """Renderer output includes assembly summary line."""
+    store = WorkflowStore(tmp_path / "context.sqlite")
+    state = store.create_workflow("test")
+    ledger = ContextLedger.from_store(store)
+
+    ledger.record_artifact(
+        state.workflow_id,
+        "source_artifact",
+        "test-source",
+        "test",
+        None,
+        "test-ref",
+        100,
+    )
+
+    from context.ledger import _artifact_from_row
+    with ledger.connect() as conn:
+        artifact_row = conn.execute(
+            "SELECT * FROM context_artifacts WHERE workflow_id = ? LIMIT 1",
+            (state.workflow_id,),
+        ).fetchone()
+        artifact = _artifact_from_row(artifact_row)
+
+    ledger.record_event(
+        state.workflow_id,
+        "test_step",
+        artifact.artifact_id,
+        "retrieved",
+        metadata={"retrieval_method": "bm25"},
+    )
+
+    audit = ledger.audit_workflow(state.workflow_id)
+    view = build_context_audit_view(audit)
+    output = render_context_audit(view)
+
+    assert "Assembly:" in output
+    assert "observed" in output
+    assert "retrieved" in output
+
+
+def test_ctx_audit_assembly_003_format_exact(tmp_path) -> None:
+    """Assembly summary matches exact format specification."""
+    store = WorkflowStore(tmp_path / "context.sqlite")
+    state = store.create_workflow("test")
+    ledger = ContextLedger.from_store(store)
+
+    ledger.record_artifact(
+        state.workflow_id,
+        "source_artifact",
+        "test-source",
+        "test",
+        None,
+        "test-ref",
+        100,
+    )
+
+    from context.ledger import _artifact_from_row
+    with ledger.connect() as conn:
+        artifact_row = conn.execute(
+            "SELECT * FROM context_artifacts WHERE workflow_id = ? LIMIT 1",
+            (state.workflow_id,),
+        ).fetchone()
+        artifact = _artifact_from_row(artifact_row)
+
+    ledger.record_event(
+        state.workflow_id,
+        "test_step",
+        artifact.artifact_id,
+        "retrieved",
+        metadata={"retrieval_method": "bm25"},
+    )
+
+    audit = ledger.audit_workflow(state.workflow_id)
+    view = build_context_audit_view(audit)
+
+    # Verify exact format: "Assembly: {N} observed, {N} retrieved, {N} selected, {N} rejected"
+    pattern = r'^Assembly: \d+ observed, \d+ retrieved, \d+ selected, \d+ rejected$'
+    assert re.match(pattern, view.assembly_summary)
