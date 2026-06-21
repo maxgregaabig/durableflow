@@ -163,7 +163,7 @@ def build_context_audit_view(audit: ContextAudit) -> ContextAuditView:
 
 
 def render_context_audit(view: ContextAuditView) -> str:
-    lines = [view.headline, view.lineage_summary, ""]
+    lines = [view.headline, view.lineage_summary, view.assembly_summary, ""]
     for step in view.steps:
         lines.append(f"Step: {step.step_name}")
         lines.append(f"  Status: {step.plain_status}")
