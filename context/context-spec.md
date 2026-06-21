@@ -1,6 +1,6 @@
 # Specification: DurableFlow Context (`/context`)
 
-**Status:** DRAFT
+**Status:** DRAFT (v0.1 implemented; see §14 for next evolution)
 **Extension level:** Peer extension to Colony and Planner. Context extends DurableFlow core by making information state durable and inspectable alongside workflow execution state.
 **Author:** Marcos Polanco
 **Created:** 2026-06-19
@@ -758,7 +758,7 @@ The following items are intentionally preserved but moved out of the v0.1 implem
 
 ### v0.2: Trust Policy
 
-Adds input-side trust and freshness governance.
+Adds input-side trust and freshness governance. Feeds **Context Provenance Quality** (§14.4): once trust state exists, the audit surface can answer not only "was this context used?" but "should it have been used?" via derived Context Quality Scores.
 
 Scope:
 
@@ -947,3 +947,183 @@ Context durability answers:
 The v0.1 extension adds a local SQLite context ledger for artifacts such as emails, calendar events, tool outputs, prompts, and model responses. Each artifact can be observed, selected, consumed, and linked to a decision through explicit lineage. The result is an audit trace that shows which context was selected, which context was mounted, and which artifacts the instrumented model credited as influential.
 
 This is intentionally small. It is not a knowledge-management product. It is the missing operational primitive between "we selected some context" and "we can prove which information the workflow used and credited." Trust policy, supersession, compaction, and replay are roadmap layers built on this ledger.
+
+---
+
+## 14. Next Evolution: Assembly Lineage
+
+**Status:** DRAFT — forward specification. Does not modify v0.1 completion criteria.
+**Applies to:** Post-v0.1 evolution. Builds on the implemented ledger in §0–§13 without replacing them.
+
+### 14.1 The Missing Primitive
+
+v0.1 proves that agentic workflows need durable information lineage. The v0.1 lifecycle is:
+
+```text
+observed → selected → consumed → influential
+```
+
+This leaves a blind spot. When a workflow starts with 500 artifacts and selects 9, the ledger records that 9 were selected and consumed. It does not record:
+
+- What retrieval method produced the candidate set?
+- What were the candidates that were NOT selected?
+- What scores and ranks determined selection?
+- Why was artifact A chosen over artifact B?
+
+The question "why was this artifact selected while others were not?" cannot be answered from v0.1 events alone.
+
+The missing primitive is **assembly lineage** — durable events that record how candidate information competed for limited context budget before model consumption.
+
+The extended lifecycle:
+
+```text
+observed → retrieved → {selected, rejected} → consumed → influential
+```
+
+`selected` and `rejected` are parallel terminal outcomes, not sequential events. An artifact retrieved from the candidate pool is either selected for the active context set or explicitly rejected with a reason.
+
+This is not a platform feature. It is another set of durable events in the same lineage model that v0.1 established.
+
+### 14.2 Assembly Lineage Events
+
+**New lifecycle event types:**
+
+| Event | Meaning |
+|-------|---------|
+| `retrieved` | Artifact returned by a retrieval step (search, index lookup, memory fetch) |
+| `rejected` | Artifact retrieved but explicitly excluded from selection |
+
+These extend the v0.1 lifecycle without replacing it:
+
+```text
+observed → retrieved → {selected, rejected} → consumed → influential
+```
+
+**Event metadata:**
+
+`retrieved` and `rejected` events SHOULD carry optional metadata:
+
+- `retrieval_method` — e.g., `bm25`, `hybrid`, `memory_lookup`, `deterministic_fixture`
+- `retrieval_score` — numeric score from the retrieval method
+- `rank_position` — ordinal position in ranked results
+- `rejection_reason` — why the artifact was not selected (e.g., `token_budget`, `low_score`, `duplicate`)
+
+Most retrieval systems combine retrieval and ranking in a single operation. If a future workflow implements separate reranking, a `reranked` event can be added then. v0.2 does not require it.
+
+**Event-sourced modeling:**
+
+The extension remains event-sourced. Retrieval metadata is stored in `ContextLedgerEvent.metadata`:
+
+```python
+ContextLedgerEvent(
+    event_type="retrieved",
+    artifact_id="email-042",
+    metadata={
+        "retrieval_method": "bm25",
+        "retrieval_score": 0.82,
+        "rank_position": 4
+    }
+)
+
+ContextLedgerEvent(
+    event_type="rejected",
+    artifact_id="email-019",
+    metadata={
+        "rejection_reason": "token_budget"
+    }
+)
+```
+
+Separate `RetrievalRecord` or `RetrievalCandidate` tables are NOT required unless implementation pressure proves they are necessary. The event-sourced model is sufficient.
+
+**Audit trace additions:**
+
+The `ContextAudit` summary MUST include:
+
+- `observed_count` — total artifacts that entered the workflow's information universe
+- `retrieved_count` — artifacts returned by retrieval
+- `selected_count` — artifacts chosen for the active context set
+- `rejected_count` — artifacts retrieved but not selected
+
+**Gherkin:**
+
+```gherkin
+Scenario: Assembly pipeline is durably traced
+  Given a corpus of 500 prior emails and calendar events
+  When select_context retrieves 37 candidates and selects 9
+  Then each retrieved artifact receives a retrieved event with retrieval_method and score
+  And each rejected candidate receives a rejected event with rejection_reason
+  And the audit trace shows observed_count=500, retrieved_count=37, selected_count=9, rejected_count=28
+  And the reviewer can inspect retrieval scores, ranks, and rejection reasons
+```
+
+### 14.3 Supersession
+
+Supersession is already preserved in §11 v0.2. This evolution reaffirms it as a primitive.
+
+When artifact `email-042-v1` is superseded by `email-042-v2`, the ledger records:
+
+- `superseded_by_artifact_id` on `email-042-v1`
+- `superseded` lifecycle event on `email-042-v1`
+
+The audit trace shows superseded artifacts with a clear label. Supersession resolution is a read-mode operation over these events — not a separate service.
+
+### 14.4 Context Replay
+
+Context replay is already preserved in §11 v0.3. With assembly lineage, replay reconstructs:
+
+- The ordered retrieved artifact list with retrieval_method, score, and rank_position
+- The selected set
+- The rejected set with rejection_reason
+- The consumed set (what was mounted into the prompt)
+- The influential set (what the decision credited)
+
+Replay is a read-mode operation over durable events. It does not require storing raw prompts or responses by default.
+
+**Gherkin:**
+
+```gherkin
+Scenario: Context replay reconstructs the assembly pipeline
+  Given a completed triage_llm decision with assembly lineage
+  When the operator requests context replay for that workflow and step
+  Then the extension reconstructs the retrieved, selected, and rejected artifact lists
+  And shows retrieval_method, score, and rank_position for each retrieved artifact
+  And shows rejection_reason for each rejected artifact
+  And omits raw content unless the caller explicitly requests unsafe debug output
+```
+
+### 14.5 Revised Positioning
+
+The v0.1 claim remains valid:
+
+> A workflow checkpoint is incomplete unless the runtime can also explain what information entered context, what was selected, what was consumed by the model, and what the workflow credited as influential in a decision.
+
+Assembly lineage extends this claim:
+
+> A workflow checkpoint is incomplete unless the runtime can also explain how candidate information competed for limited context budget and why some artifacts were selected while others were not.
+
+This is not "context infrastructure." It is the upstream primitive that makes infrastructure possible. Observability platforms can build on these events. DurableFlow provides the events.
+
+The README positioning becomes:
+
+> v0.1 proves information lineage. Assembly lineage extends lineage one step upstream. Together, they provide the minimal durable surface for asking "what information did the workflow use, and how did it get there?"
+
+### 14.6 Evolution Exit Gates
+
+Before claiming assembly lineage is implemented:
+
+- [ ] `retrieved` and `rejected` event types are valid `event_type` values
+- [ ] retrieval metadata (method, score, rank, rejection_reason) appears in audit output
+- [ ] audit trace exposes retrieval scores, ranks, and rejection reasons sufficient to inspect why artifact A was preferred over artifact B
+- [ ] existing v0.1 workflows continue to work without retrieval instrumentation
+- [ ] replay reconstructs retrieved, selected, and rejected sets from events
+- [ ] superseded artifacts are labeled in the audit trace
+
+The spec does NOT claim:
+
+- Context quality scores
+- Retrieval experiment frameworks
+- Evaluation dashboards
+- Memory lifecycle management
+
+Those are platform features that can be built on top of these primitives.
