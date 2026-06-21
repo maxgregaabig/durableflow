@@ -121,6 +121,8 @@ class ContextLedger:
         _validate("event_scope", event_scope, EVENT_SCOPES)
         if event_scope == "artifact":
             _validate("event_type", event_type, ARTIFACT_EVENTS)
+            if metadata and event_type in ("retrieved", "rejected"):
+                _validate_event_metadata(event_type, metadata)
         else:
             _validate("event_type", event_type, SYSTEM_EVENTS)
         now = utc_now()
