@@ -147,7 +147,10 @@ def build_context_audit_view(audit: ContextAudit) -> ContextAuditView:
     lineage_summary = (
         "Knowledge trail shows observed, selected, consumed, and explicitly credited artifacts."
     )
-    assembly_summary = ""
+    assembly_summary = (
+        f"Assembly: {audit.observed_count} observed, {audit.retrieved_count} retrieved, "
+        f"{audit.selected_count} selected, {audit.rejected_count} rejected"
+    )
     return ContextAuditView(
         workflow_id=audit.workflow_id,
         headline=headline,
