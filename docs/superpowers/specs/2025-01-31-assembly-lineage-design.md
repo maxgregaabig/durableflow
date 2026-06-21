@@ -40,16 +40,18 @@ This is an additive change. No schema migration, no new tables, no framework beh
 
 ## 3. Event Metadata Contracts
 
-Metadata is validated JSON with defined contracts. Not casual JSON, not schema columns.
+Metadata is **contracted JSON** with strict validation. Unknown keys are rejected.
 
 ### `retrieved` Event
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `retrieval_method` | string | Yes | e.g., `bm25`, `hybrid`, `memory_lookup`, `deterministic_fixture` |
-| `retrieval_score` | float | No | Numeric score from the retrieval method |
-| `rank_position` | int | No | Ordinal position in ranked results |
-| `retrieval_query_digest` | string | No | Hash of the query that produced this retrieval |
+| Field | Type | Required | Validation |
+|-------|------|----------|------------|
+| `retrieval_method` | string | Yes | Non-empty string |
+| `retrieval_score` | int/float | No | Numeric value |
+| `rank_position` | int | No | Positive integer (≥1) |
+| `retrieval_query_digest` | string | No | Non-empty string |
+
+Only these four keys are allowed. Any other key in metadata causes rejection.
 
 Example:
 ```json
@@ -62,12 +64,14 @@ Example:
 
 ### `rejected` Event
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `rejection_reason` | string | Yes | e.g., `token_budget`, `low_score`, `duplicate` |
-| `retrieval_method` | string | No | Copy from retrieved event for analysis |
-| `retrieval_score` | float | No | Copy from retrieved event for analysis |
-| `rank_position` | int | No | Copy from retrieved event for analysis |
+| Field | Type | Required | Validation |
+|-------|------|----------|------------|
+| `rejection_reason` | string | Yes | Non-empty string |
+| `retrieval_method` | string | No | Non-empty string |
+| `retrieval_score` | int/float | No | Numeric value |
+| `rank_position` | int | No | Positive integer (≥1) |
+
+Only these four keys are allowed. Any other key in metadata causes rejection.
 
 Example:
 ```json
@@ -97,7 +101,7 @@ ARTIFACT_EVENTS = {
 }
 ```
 
-Add metadata validation:
+Add metadata contracts with strict key validation:
 
 ```python
 METADATA_CONTRACTS = {
@@ -111,16 +115,62 @@ METADATA_CONTRACTS = {
     },
 }
 
+TYPE_VALIDATORS = {
+    "retrieval_method": lambda v: isinstance(v, str) and v,
+    "rejection_reason": lambda v: isinstance(v, str) and v,
+    "retrieval_score": lambda v: isinstance(v, (int, float)),
+    "rank_position": lambda v: isinstance(v, int) and v >= 1,
+    "retrieval_query_digest": lambda v: isinstance(v, str) and v,
+}
+
 def _validate_event_metadata(event_type: str, metadata: dict[str, Any]) -> None:
     if event_type not in METADATA_CONTRACTS:
         return
     contract = METADATA_CONTRACTS[event_type]
-    for key in contract["required"]:
-        if key not in metadata:
-            raise ValueError(f"metadata missing required key: {key}")
+    allowed_keys = set(contract["required"]) | set(contract["optional"])
+
+    # Reject unknown keys
+    unknown = set(metadata.keys()) - allowed_keys
+    if unknown:
+        raise ValueError(f"metadata contains unknown keys: {unknown}")
+
+    # Check required keys
+    missing = set(contract["required"]) - set(metadata.keys())
+    if missing:
+        raise ValueError(f"metadata missing required keys: {missing}")
+
+    # Validate types for present keys
+    for key, value in metadata.items():
+        if key in TYPE_VALIDATORS:
+            if not TYPE_VALIDATORS[key](value):
+                raise ValueError(f"metadata key '{key}' failed type validation")
 ```
 
-Call validation in `record_event()` for artifact-scope events.
+Integrate validation into `record_event()`:
+
+```python
+def record_event(
+    self,
+    workflow_id: str,
+    step_name: str,
+    artifact_id: str | None,
+    event_type: str,
+    reason: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> ContextLedgerEvent:
+    event_scope = "artifact" if artifact_id is not None else "system"
+    _validate("event_scope", event_scope, EVENT_SCOPES)
+    if event_scope == "artifact":
+        _validate("event_type", event_type, ARTIFACT_EVENTS)
+        # Validate metadata contracts for retrieved/rejected
+        if metadata and event_type in ("retrieved", "rejected"):
+            _validate_event_metadata(event_type, metadata)
+    else:
+        _validate("event_type", event_type, SYSTEM_EVENTS)
+    # ... rest of existing implementation
+```
+
+**Idempotency:** `retrieved` and `rejected` events follow the same idempotency pattern as `selected` and `consumed`. The unique constraint on `(workflow_id, step_name, artifact_id, event_type)` prevents duplicate lifecycle events. A retrieval step that re-runs after crash/resume will not emit duplicate events for the same artifact.
 
 ### 4.2 `context/models.py`
 
@@ -139,6 +189,8 @@ def retrieved_count(self) -> int:
 def rejected_count(self) -> int:
     return _count_events(self.events, "rejected")
 ```
+
+**Count semantics:** These properties count **unique artifacts** per event type, deduplicated by `(workflow_id, step_name, artifact_id, event_type)`. This matches the existing v0.1 pattern for `selected_count` and `consumed_count`. The workflow headline shows unique artifact counts; detailed event logging can expose repeated events in a future pass.
 
 ### 4.3 `context/audit_view.py`
 
@@ -172,15 +224,27 @@ Context audit: 9 selected, 7 consumed, 3 influential sources, 2 decisions
 Assembly: 500 observed, 37 retrieved, 9 selected, 28 rejected
 ```
 
+**Step-level visibility:** `retrieved` and `rejected` artifacts are **not** shown in step `mounted_context` by default. The existing filter in `audit_view.py` (line 86) includes only `observed`, `selected`, and `consumed` events. `retrieved`/`rejected` artifacts are audit-only for the assembly summary line. Future passes can add detailed retrieval views if needed.
+
 ### 4.4 Tests
 
 Add tests in `tests/test_context_ledger.py`:
 
 - Test `retrieved` event with valid metadata
 - Test `retrieved` event rejected when missing `retrieval_method`
+- Test `retrieved` event rejected when unknown key present
+- Test `retrieved` event rejected with invalid `rank_position` (zero or negative)
 - Test `rejected` event with valid metadata
 - Test `rejected` event rejected when missing `rejection_reason`
+- Test `rejected` event rejected when unknown key present
+- Test type validation for `retrieval_score` (int/float accepted)
 - Test audit counts include retrieved/rejected events
+- Test audit counts deduplicate artifacts (same artifact retrieved twice in different steps counts once)
+- Test backward compatibility: existing v0.1 workflows without retrieval instrumentation still pass
+
+**Count semantics tests:**
+- `test_audit_counts_unique_artifacts`: Verify that `observed_count`, `retrieved_count`, and `rejected_count` deduplicate by `(workflow_id, step_name, artifact_id, event_type)`
+- `test_assembly_summary_format`: Verify the assembly summary string format matches expected output
 
 ---
 
@@ -212,12 +276,17 @@ These will enter the codebase only when the full supersession feature is impleme
 
 Before claiming assembly lineage is implemented:
 
-- [ ] `retrieved` and `rejected` are valid `event_type` values
+- [ ] `retrieved` and `rejected` are valid `event_type` values in `ARTIFACT_EVENTS`
 - [ ] Metadata validation enforces required keys
+- [ ] Metadata validation rejects unknown keys
+- [ ] Metadata validation enforces type constraints (non-empty strings, positive ints, numeric scores)
 - [ ] Audit summary exposes observed/retrieved/selected/rejected counts
+- [ ] Audit counts deduplicate artifacts (unique per event type)
 - [ ] Renderer shows two-line header
-- [ ] Tests cover metadata validation contracts
+- [ ] Tests cover metadata validation contracts (required keys, unknown keys, type constraints)
+- [ ] Tests cover count semantics (unique artifacts)
 - [ ] Existing v0.1 workflows continue to work without retrieval instrumentation
+- [ ] Idempotency preserved: duplicate (workflow_id, step_name, artifact_id, event_type) rejected
 
 ---
 
