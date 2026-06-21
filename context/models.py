@@ -79,6 +79,18 @@ class ContextAudit:
     def decision_count(self) -> int:
         return len(self.decisions)
 
+    @property
+    def observed_count(self) -> int:
+        return _count_events(self.events, "observed")
+
+    @property
+    def retrieved_count(self) -> int:
+        return _count_events(self.events, "retrieved")
+
+    @property
+    def rejected_count(self) -> int:
+        return _count_events(self.events, "rejected")
+
 
 def _count_events(events: list[ContextLedgerEvent], event_type: str) -> int:
     return len(
