@@ -386,6 +386,31 @@ def test_ctx_led_assembly_004_retrieved_event_unknown_key_rejected(tmp_path) -> 
         )
 
 
+def test_ctx_led_assembly_004b_retrieved_event_none_metadata_rejected(tmp_path) -> None:
+    """retrieved event with metadata=None is rejected (required key missing)."""
+    store = WorkflowStore(tmp_path / "context.sqlite")
+    state = store.create_workflow("test")
+    ledger = ContextLedger.from_store(store)
+
+    artifact = ledger.record_artifact(
+        state.workflow_id,
+        "source_artifact",
+        "test-source",
+        "test_type",
+        None,
+        "test-ref",
+        100,
+    )
+    with pytest.raises(ValueError, match="metadata missing required keys"):
+        ledger.record_event(
+            state.workflow_id,
+            "test_step",
+            artifact.artifact_id,
+            "retrieved",
+            metadata=None,
+        )
+
+
 def test_ctx_led_assembly_005_retrieved_event_invalid_rank_position(tmp_path) -> None:
     """retrieved event with zero rank_position is rejected."""
     store = WorkflowStore(tmp_path / "context.sqlite")
