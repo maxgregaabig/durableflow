@@ -746,3 +746,51 @@ def test_ctx_led_assembly_023_audit_counts_multiple_artifacts(tmp_path) -> None:
     assert audit.retrieved_count == 3
     assert audit.selected_count == 2
     assert audit.rejected_count == 1
+
+
+def test_ctx_led_assembly_050_backward_compatibility_v01(tmp_path) -> None:
+    """Existing v0.1 workflows without retrieval instrumentation still work."""
+    store = WorkflowStore(tmp_path / "context.sqlite")
+    state = store.create_workflow("test")
+    ledger = ContextLedger.from_store(store)
+
+    artifact = ledger.record_artifact(
+        state.workflow_id,
+        "source_artifact",
+        "test-source",
+        "test_type",
+        None,
+        "test-ref",
+        100,
+    )
+
+    # v0.1 style events (no retrieved/rejected)
+    ledger.record_event(
+        state.workflow_id,
+        "test_step",
+        artifact.artifact_id,
+        "observed",
+    )
+    ledger.record_event(
+        state.workflow_id,
+        "test_step",
+        artifact.artifact_id,
+        "selected",
+    )
+    ledger.record_event(
+        state.workflow_id,
+        "test_step",
+        artifact.artifact_id,
+        "consumed",
+    )
+
+    audit = ledger.audit_workflow(state.workflow_id)
+    assert audit.observed_count == 1
+    assert audit.selected_count == 1
+    assert audit.consumed_count == 1
+    assert audit.retrieved_count == 0
+    assert audit.rejected_count == 0
+
+    # Should work with audit view builder
+    view = build_context_audit_view(audit)
+    assert "Assembly: 1 observed, 0 retrieved, 1 selected, 0 rejected" in view.assembly_summary
