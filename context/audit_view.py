@@ -25,12 +25,22 @@ ROADMAP_NOTICE = (
 
 
 @dataclass(frozen=True)
+class RetrievalMetadata:
+    """Retrieval metadata for an artifact."""
+    score: float | None = None
+    rank: int | None = None
+    rejection_reason: str | None = None
+    retrieval_method: str | None = None
+
+
+@dataclass(frozen=True)
 class ArtifactView:
     label: str
     source_label: str
     event_labels: list[str]
     influence_label: str
     content_ref_label: str
+    retrieval: RetrievalMetadata = field(default_factory=RetrievalMetadata)
 
 
 @dataclass(frozen=True)
@@ -49,6 +59,7 @@ class ContextAuditStepView:
     mounted_context: list[ArtifactView] = field(default_factory=list)
     decision_summary: DecisionView | None = None
     notes: list[str] = field(default_factory=list)
+    rejected_context: list[ArtifactView] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -65,8 +76,11 @@ class ContextAuditView:
 def build_context_audit_view(audit: ContextAudit) -> ContextAuditView:
     artifacts_by_id = {artifact.artifact_id: artifact for artifact in audit.artifacts}
     events_by_step: dict[str, list] = {}
+    events_by_artifact: dict[str, list] = {}
     for event in audit.events:
         events_by_step.setdefault(event.step_name, []).append(event)
+        if event.artifact_id:
+            events_by_artifact.setdefault(event.artifact_id, []).append(event)
     lineage_by_decision: dict[str, list[str]] = {}
     for lineage in audit.lineage:
         lineage_by_decision.setdefault(lineage.decision_id, []).append(lineage.artifact_id)
@@ -84,30 +98,37 @@ def build_context_audit_view(audit: ContextAudit) -> ContextAuditView:
         artifact_ids = [
             event.artifact_id
             for event in step_events
-            if event.artifact_id is not None and event.event_type in {"observed", "selected", "consumed"}
+            if event.artifact_id is not None and event.event_type in {"observed", "retrieved", "selected", "consumed", "rejected"}
         ]
         mounted_context: list[ArtifactView] = []
+        rejected_context: list[ArtifactView] = []
         for artifact_id in dict.fromkeys(artifact_ids):
             artifact = artifacts_by_id[artifact_id]
+            artifact_events = events_by_artifact.get(artifact_id, [])
             event_labels = [
                 _event_label(event.event_type)
-                for event in step_events
-                if event.artifact_id == artifact_id
+                for event in artifact_events
+                if event.step_name == step_name
             ]
-            mounted_context.append(
-                ArtifactView(
-                    label=_artifact_label(artifact.source_type, artifact.source),
-                    source_label=f"Source: {artifact.source_type}",
-                    event_labels=event_labels,
-                    influence_label=_influence_label(
-                        artifact.artifact_role,
-                        artifact_id,
-                        event_labels,
-                        step_influential_artifact_ids,
-                    ),
-                    content_ref_label=f"Reference: {artifact.content_ref or artifact.source}",
-                )
+            retrieval = _extract_retrieval_metadata(artifact_events, step_name)
+            artifact_view = ArtifactView(
+                label=_artifact_label(artifact.source_type, artifact.source),
+                source_label=f"Source: {artifact.source_type}",
+                event_labels=event_labels,
+                influence_label=_influence_label(
+                    artifact.artifact_role,
+                    artifact_id,
+                    event_labels,
+                    step_influential_artifact_ids,
+                ),
+                content_ref_label=f"Reference: {artifact.content_ref or artifact.source}",
+                retrieval=retrieval,
             )
+            # Separate rejected artifacts for display
+            if any(e.event_type == "rejected" and e.step_name == step_name for e in artifact_events):
+                rejected_context.append(artifact_view)
+            else:
+                mounted_context.append(artifact_view)
 
         decision_view = None
         notes: list[str] = []
@@ -127,8 +148,8 @@ def build_context_audit_view(audit: ContextAudit) -> ContextAuditView:
                 influential_sources=influential_sources,
             )
 
-        if not mounted_context and decision_view is None:
-            notes.append("No context artifacts were mounted for this step.")
+        if not mounted_context and not rejected_context and decision_view is None:
+            notes.append("No context artifacts were processed for this step.")
         steps.append(
             ContextAuditStepView(
                 step_name=step_name,
@@ -136,6 +157,7 @@ def build_context_audit_view(audit: ContextAudit) -> ContextAuditView:
                 mounted_context=mounted_context,
                 decision_summary=decision_view,
                 notes=notes,
+                rejected_context=rejected_context,
             )
         )
 
@@ -174,6 +196,34 @@ def render_context_audit(view: ContextAuditView) -> str:
                 lines.append(f"    - {artifact.label} [{events}]")
                 lines.append(f"      {artifact.source_label}; {artifact.content_ref_label}")
                 lines.append(f"      Influence: {artifact.influence_label}")
+                # Add retrieval metadata if available
+                if artifact.retrieval.score is not None or artifact.retrieval.rank is not None:
+                    retrieval_parts = []
+                    if artifact.retrieval.retrieval_method:
+                        retrieval_parts.append(f"method: {artifact.retrieval.retrieval_method}")
+                    if artifact.retrieval.score is not None:
+                        retrieval_parts.append(f"score: {artifact.retrieval.score:.2f}")
+                    if artifact.retrieval.rank is not None:
+                        retrieval_parts.append(f"rank: {artifact.retrieval.rank}")
+                    if retrieval_parts:
+                        lines.append(f"      Retrieval: {', '.join(retrieval_parts)}")
+        if step.rejected_context:
+            lines.append("  Rejected context:")
+            for artifact in step.rejected_context:
+                events = ", ".join(artifact.event_labels)
+                lines.append(f"    - {artifact.label} [{events}]")
+                lines.append(f"      {artifact.source_label}; {artifact.content_ref_label}")
+                # Add retrieval metadata for rejected artifacts
+                if artifact.retrieval.rejection_reason:
+                    lines.append(f"      Reason: {artifact.retrieval.rejection_reason}")
+                if artifact.retrieval.score is not None or artifact.retrieval.rank is not None:
+                    retrieval_parts = []
+                    if artifact.retrieval.score is not None:
+                        retrieval_parts.append(f"score: {artifact.retrieval.score:.2f}")
+                    if artifact.retrieval.rank is not None:
+                        retrieval_parts.append(f"rank: {artifact.retrieval.rank}")
+                    if retrieval_parts:
+                        lines.append(f"      Retrieval: {', '.join(retrieval_parts)}")
         if step.decision_summary is not None:
             decision = step.decision_summary
             lines.append(f"  Decision: {decision.label}")
@@ -235,3 +285,30 @@ def _influence_label(
     if "selected" in event_labels:
         return "Selected, not influential yet"
     return "Observed, not selected"
+
+
+def _extract_retrieval_metadata(events: list, step_name: str) -> RetrievalMetadata:
+    """Extract retrieval metadata from artifact events."""
+    score = None
+    rank = None
+    rejection_reason = None
+    retrieval_method = None
+    for event in events:
+        if event.step_name != step_name:
+            continue
+        if event.event_type == "retrieved" and event.metadata:
+            score = event.metadata.get("retrieval_score")
+            rank = event.metadata.get("rank_position")
+            retrieval_method = event.metadata.get("retrieval_method")
+        elif event.event_type == "rejected" and event.metadata:
+            rejection_reason = event.metadata.get("rejection_reason")
+            if score is None:
+                score = event.metadata.get("retrieval_score")
+            if rank is None:
+                rank = event.metadata.get("rank_position")
+    return RetrievalMetadata(
+        score=score,
+        rank=rank,
+        rejection_reason=rejection_reason,
+        retrieval_method=retrieval_method,
+    )

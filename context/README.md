@@ -75,9 +75,7 @@ A registered piece of information: incoming email, prior email, calendar event, 
 An append-only record describing how information moved through a workflow:
 
 ```text
-observed
-selected
-consumed
+observed → retrieved → {selected, rejected} → consumed → influential
 ```
 
 **DecisionRecord**
@@ -111,15 +109,19 @@ The first demo runs inbox triage with a `ContextLedger`. The CLI renders the sam
 
 ## MVP Scope
 
-The first release intentionally stays small.
+v0.2a (current) delivers assembly lineage with per-artifact metadata.
 
-Included:
+Included (v0.1 + v0.2a):
 
 - artifact registration
-- context lifecycle events
+- context lifecycle events (observed, retrieved, selected, rejected, consumed, influential)
 - decision records
 - explicit lineage
 - deterministic fixture attribution
+- assembly lineage metadata validation
+- per-artifact retrieval metadata (score, rank, rejection_reason) in audit output
+- rejected context display with reasons
+- audit summary with observed/retrieved/selected/rejected counts
 - audit CLI
 - deterministic tests
 
@@ -136,7 +138,7 @@ Deferred:
 
 The first demo is simple:
 
-> Run inbox triage. Open audit trace. See the exact artifacts selected, consumed, and credited as influential in the model decision.
+> Run inbox triage. Open audit trace. See the exact artifacts retrieved, selected, rejected with reasons, consumed, and credited as influential in the model decision.
 
 ## Design Principles
 
@@ -171,30 +173,55 @@ Classification:
 action_required
 ```
 
-With Context:
+With Context (v0.2a - assembly lineage):
 
 ```text
-Workflow completed successfully.
+Context Audit Trace for wf-context-demo: 11 selected, 14 consumed, 2 influential, 2 decisions.
+Assembly: 64 observed, 59 retrieved, 11 selected, 48 rejected
 
-Selected artifacts:
-- incoming_email
-- prior_email_042
-- calendar_event_003
+Step: select_context
+  Status: selected
+  Mounted context:
+    - prior email: email-012 [retrieved, selected]
+      Source: prior_email; Reference: mock_emails:email-012
+      Influence: Influential
+      Retrieval: method: bm25, score: 37.71, rank: 2
+    - calendar event: cal-001 [retrieved, selected]
+      Source: calendar_event; Reference: mock_calendar:cal-001
+      Influence: Influential
+      Retrieval: method: bm25, score: 45.55, rank: 1
+  Rejected context:
+    - prior email: email-018 [retrieved, rejected]
+      Source: prior_email; Reference: mock_emails:email-018
+      Reason: token_budget
+      Retrieval: score: 11.59, rank: 12
+    - prior email: email-029 [retrieved, rejected]
+      Source: prior_email; Reference: mock_emails:email-029
+      Reason: token_budget
+      Retrieval: score: 11.23, rank: 13
+    [... 46 more rejected artifacts ...]
 
-Consumed artifacts:
-- incoming_email
-- prior_email_042
-- calendar_event_003
-
-Influential artifacts:
-- prior_email_042
-- calendar_event_003
-
-Decision:
-action_required
+Step: triage_llm
+  Decision: Decision recorded for triage_llm
+    Influential sources:
+      - calendar event: cal-001
+      - prior email: email-012
 ```
 
-The result is not just execution history. It is a knowledge trail.
+The audit trace shows:
+- **59 artifacts were retrieved** from the corpus of 64
+- **11 were selected** for the token budget
+- **48 were rejected** with explicit reasons (`token_budget`)
+- Each artifact shows its **retrieval score, rank, and method**
+- The **influential sources** are explicitly linked to the decision
+
+Run the demo to see the full trace:
+
+```bash
+python examples/inbox_triage_context_demo.py
+```
+
+The result is not just execution history. It is a knowledge trail with assembly lineage.
 
 ## Relationship To Context Engineering
 
@@ -236,7 +263,12 @@ and:
 
 ## Audit Boundary
 
-v0.1 proves lineage.
+v0.2a delivers assembly lineage with per-artifact metadata:
+
+- retrieved/rejected events are recorded with validated metadata
+- audit traces show per-artifact retrieval scores, ranks, and rejection reasons
+- reviewers can inspect why artifact A was selected over artifact B
+- assembly summary shows observed/retrieved/selected/rejected counts
 
 It does not prove:
 
@@ -250,16 +282,24 @@ Those capabilities are planned as future layers built on top of the ledger.
 
 ## Future Roadmap
 
-v0.2:
+v0.2a (delivered June 2026):
 
-- trust policy
-- freshness policy
-- supersession
-- context blocking
+- assembly lineage events (retrieved, rejected)
+- metadata validation (required keys, unknown keys, type checks)
+- per-artifact retrieval metadata in audit output (scores, ranks, reasons)
+- workflow instrumentation for assembly lineage
+- audit summary counts (observed, retrieved, selected, rejected)
+
+v0.2b:
+
+- superseded event type and labeling
+- context replay reconstruction
 
 v0.3:
 
-- context replay
+- trust policy
+- freshness policy
+- context blocking
 - prompt replay
 - context compaction
 

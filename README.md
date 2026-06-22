@@ -136,14 +136,16 @@ Read **[planner/planner-spec.md](planner/planner-spec.md)** for the draft contra
 
 **Durable information state alongside durable execution state.**
 
-Context adds a small ledger for the inbox triage workflow so an operator can see what information was observed, selected, consumed by model steps, and explicitly credited as influential by the mock model.
+Context adds a small ledger for the inbox triage workflow so an operator can see what information was observed, retrieved, selected, consumed by model steps, and explicitly credited as influential by the mock model.
 
 ```bash
 python3 examples/inbox_triage_context_demo.py
 python3 -m context.cli audit --db examples/inbox_triage_context_demo.sqlite --workflow-id wf-context-demo
 ```
 
-The ledger stores digests and source references by default, not raw email bodies, prompts, or model responses. v0.1 is deliberately limited to lineage; trust, freshness, contradiction checks, supersession, and replay are roadmap capabilities.
+v0.2a adds **assembly lineage**: retrieved and rejected events that track how candidate information competed for context budget, with metadata validation and audit summary counts.
+
+The ledger stores digests and source references by default, not raw email bodies, prompts, or model responses. Supersession labeling, context replay, and per-artifact retrieval inspection are roadmap capabilities.
 
 Start with **[context/README.md](context/README.md)** for the product-level explanation, then read **[docs/context-extension.md](docs/context-extension.md)** for the schema, audit contract, privacy boundary, and before/after comparison.
 

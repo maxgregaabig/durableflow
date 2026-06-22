@@ -277,3 +277,70 @@ def test_ctx_audit_assembly_003_format_exact(tmp_path) -> None:
     # Verify exact format: "Assembly: {N} observed, {N} retrieved, {N} selected, {N} rejected"
     pattern = r'^Assembly: \d+ observed, \d+ retrieved, \d+ selected, \d+ rejected$'
     assert re.match(pattern, view.assembly_summary)
+
+
+def test_ctx_audit_assembly_004_renderer_shows_visible_evidence(tmp_path) -> None:
+    """Renderer shows per-artifact retrieval metadata and rejected context section."""
+    store = WorkflowStore(tmp_path / "context.sqlite")
+    state = store.create_workflow("test")
+    ledger = ContextLedger.from_store(store)
+
+    # Create 3 artifacts: 1 selected, 2 rejected
+    from context.ledger import _artifact_from_row
+    artifacts = []
+    for i in range(3):
+        ledger.record_artifact(
+            state.workflow_id,
+            "source_artifact",
+            f"source-{i}",
+            "test",
+            None,
+            f"ref-{i}",
+            100,
+        )
+
+    with ledger.connect() as conn:
+        for row in conn.execute(
+            "SELECT * FROM context_artifacts WHERE workflow_id = ?",
+            (state.workflow_id,),
+        ).fetchall():
+            artifacts.append(_artifact_from_row(row))
+
+    # Record retrieved events for all with scores and ranks
+    for rank, artifact in enumerate(artifacts, start=1):
+        ledger.record_event(
+            state.workflow_id,
+            "select_context",
+            artifact.artifact_id,
+            "retrieved",
+            metadata={"retrieval_method": "bm25", "retrieval_score": 0.9 - (rank * 0.1), "rank_position": rank},
+        )
+
+    # Select first artifact
+    ledger.record_event(
+        state.workflow_id,
+        "select_context",
+        artifacts[0].artifact_id,
+        "selected",
+    )
+
+    # Reject second and third artifacts with reasons
+    for artifact in artifacts[1:]:
+        ledger.record_event(
+            state.workflow_id,
+            "select_context",
+            artifact.artifact_id,
+            "rejected",
+            metadata={"rejection_reason": "token_budget"},
+        )
+
+    audit = ledger.audit_workflow(state.workflow_id)
+    view = build_context_audit_view(audit)
+    rendered = render_context_audit(view)
+
+    # Verify visible evidence
+    assert "Rejected context:" in rendered
+    assert "Reason: token_budget" in rendered
+    assert "Retrieval:" in rendered
+    assert "score:" in rendered
+    assert "rank:" in rendered

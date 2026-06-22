@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .approval import ApprovalGate
-from .context_selector import ContextItem, ContextSelector, estimate_tokens
+from .context_selector import ContextItem, ContextSelector, SelectionResult, estimate_tokens
 from .engine import PauseForApproval, WorkflowEngine
 from .model_router import ModelRouter, RoutingPolicy, default_policy
 from .store import StepResult, WorkflowState, WorkflowStore
@@ -109,43 +109,107 @@ class InboxTriageWorkflow:
         calendar = _load_json(self.data_dir / "mock_calendar.json")
         corpus = _context_items(emails, calendar, exclude_email_id=email["id"])
         query = f"{email['subject']} {email['body']}"
-        selected = self.selector.select(query, corpus, token_budget=4096)
-        selected_payloads = [item.__dict__ for item in selected]
+        selection_result: SelectionResult = self.selector.select(query, corpus, token_budget=300)
+        selected_items = selection_result.selected_items
+        selected_payloads = [item.__dict__ for item in selected_items]
         ledger = dependencies.get("context_ledger")
         if ledger is not None:
-            for index, item in enumerate(selected):
-                source_type = _ledger_source_type(item.source_type)
+            # First, record all retrieved artifacts
+            retrieved_artifact_ids: dict[str, str] = {}
+            for candidate, _ in selection_result.selected:
+                source_type = _ledger_source_type(candidate.item.source_type)
                 artifact = ledger.record_artifact(
                     state.workflow_id,
                     artifact_role="source_artifact",
-                    source=item.id,
+                    source=candidate.item.id,
                     source_type=source_type,
-                    content=item.content,
-                    content_ref=_content_ref(item),
-                    token_count=item.token_count,
-                    metadata={"timestamp": item.timestamp},
+                    content=candidate.item.content,
+                    content_ref=_content_ref(candidate.item),
+                    token_count=candidate.item.token_count,
+                    metadata={"timestamp": candidate.item.timestamp},
                 )
+                retrieved_artifact_ids[candidate.item.id] = artifact.artifact_id
+                # Record retrieved event with score and rank
                 ledger.record_event(
                     state.workflow_id,
                     "select_context",
                     artifact.artifact_id,
+                    "retrieved",
+                    reason="retrieved by context selector",
+                    metadata={
+                        "retrieval_method": selection_result.retrieval_method,
+                        "retrieval_score": candidate.score,
+                        "rank_position": candidate.rank,
+                    },
+                )
+            for candidate, rejection_reason in selection_result.rejected:
+                source_type = _ledger_source_type(candidate.item.source_type)
+                artifact = ledger.record_artifact(
+                    state.workflow_id,
+                    artifact_role="source_artifact",
+                    source=candidate.item.id,
+                    source_type=source_type,
+                    content=candidate.item.content,
+                    content_ref=_content_ref(candidate.item),
+                    token_count=candidate.item.token_count,
+                    metadata={"timestamp": candidate.item.timestamp},
+                )
+                retrieved_artifact_ids[candidate.item.id] = artifact.artifact_id
+                # Record retrieved event first
+                ledger.record_event(
+                    state.workflow_id,
+                    "select_context",
+                    artifact.artifact_id,
+                    "retrieved",
+                    reason="retrieved by context selector",
+                    metadata={
+                        "retrieval_method": selection_result.retrieval_method,
+                        "retrieval_score": candidate.score,
+                        "rank_position": candidate.rank,
+                    },
+                )
+                # Then record rejected event
+                ledger.record_event(
+                    state.workflow_id,
+                    "select_context",
+                    artifact.artifact_id,
+                    "rejected",
+                    reason=f"not selected: {rejection_reason}",
+                    metadata={
+                        "rejection_reason": rejection_reason,
+                        "retrieval_score": candidate.score,
+                        "rank_position": candidate.rank,
+                    },
+                )
+            # Now record selected events for selected items
+            for budget_position, (candidate, _) in enumerate(selection_result.selected):
+                artifact_id = retrieved_artifact_ids[candidate.item.id]
+                ledger.record_event(
+                    state.workflow_id,
+                    "select_context",
+                    artifact_id,
                     "selected",
                     reason="selected by context selector",
-                    metadata={"source_item_id": item.id, "rank": index},
+                    metadata={"source_item_id": candidate.item.id, "budget_position": budget_position},
                 )
                 _log_context_event(
                     dependencies,
                     "context_selected",
                     state.workflow_id,
                     "select_context",
-                    artifact.artifact_id,
+                    artifact_id,
                 )
-                selected_payloads[index]["artifact_id"] = artifact.artifact_id
+                selected_payloads[budget_position]["artifact_id"] = artifact_id
         return StepResult(
             "select_context",
             {
                 "context": selected_payloads,
-                "token_count": sum(item.token_count for item in selected),
+                "token_count": sum(item.token_count for item in selected_items),
+                "assembly_summary": {
+                    "retrieved_count": selection_result.retrieved_count,
+                    "selected_count": len(selection_result.selected),
+                    "rejected_count": len(selection_result.rejected),
+                },
             },
             duration_ms=(time.perf_counter() - started) * 1000,
         )
