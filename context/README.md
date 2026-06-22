@@ -175,6 +175,8 @@ action_required
 
 With Context (v0.2a - assembly lineage):
 
+Excerpt from `python examples/inbox_triage_context_demo.py` (11 selected and 48 rejected artifacts shown in full in demo output):
+
 ```text
 Context Audit Trace for wf-context-demo: 11 selected, 14 consumed, 2 influential, 2 decisions.
 Assembly: 64 observed, 59 retrieved, 11 selected, 48 rejected
@@ -182,14 +184,15 @@ Assembly: 64 observed, 59 retrieved, 11 selected, 48 rejected
 Step: select_context
   Status: selected
   Mounted context:
-    - prior email: email-012 [retrieved, selected]
-      Source: prior_email; Reference: mock_emails:email-012
-      Influence: Influential
-      Retrieval: method: bm25, score: 37.71, rank: 2
     - calendar event: cal-001 [retrieved, selected]
       Source: calendar_event; Reference: mock_calendar:cal-001
-      Influence: Influential
+      Influence: Selected, not influential yet
       Retrieval: method: bm25, score: 45.55, rank: 1
+    - prior email: email-012 [retrieved, selected]
+      Source: prior_email; Reference: mock_emails:email-012
+      Influence: Selected, not influential yet
+      Retrieval: method: bm25, score: 37.71, rank: 2
+    [... 9 more selected artifacts ...]
   Rejected context:
     - prior email: email-018 [retrieved, rejected]
       Source: prior_email; Reference: mock_emails:email-018
@@ -210,10 +213,10 @@ Step: triage_llm
 
 The audit trace shows:
 - **59 artifacts were retrieved** from the corpus of 64
-- **11 were selected** for the token budget
+- **11 were selected** for the token budget (demo uses `token_budget=300` in `select_context`)
 - **48 were rejected** with explicit reasons (`token_budget`)
 - Each artifact shows its **retrieval score, rank, and method**
-- The **influential sources** are explicitly linked to the decision
+- **Influence is credited at the decision step** — selected artifacts show `Selected, not influential yet` until `triage_llm` links influential sources
 
 Run the demo to see the full trace:
 

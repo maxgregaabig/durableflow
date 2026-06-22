@@ -1110,14 +1110,16 @@ The README positioning becomes:
 
 ### 14.6 Evolution Exit Gates
 
-Before claiming assembly lineage is implemented:
+Before claiming **full** assembly lineage is implemented (§14.3–§14.4 included):
 
-- [ ] `retrieved` and `rejected` event types are valid `event_type` values
-- [ ] retrieval metadata (method, score, rank, rejection_reason) appears in audit output
-- [ ] audit trace exposes retrieval scores, ranks, and rejection reasons sufficient to inspect why artifact A was preferred over artifact B
-- [ ] existing v0.1 workflows continue to work without retrieval instrumentation
-- [ ] replay reconstructs retrieved, selected, and rejected sets from events
-- [ ] superseded artifacts are labeled in the audit trace
+- [x] `retrieved` and `rejected` event types are valid `event_type` values — verified: `context/ledger.py` `ARTIFACT_EVENTS`; `test_ctx_led_assembly_001`–`011`
+- [x] retrieval metadata (method, score, rank, rejection_reason) appears in audit output — verified: `context/audit_view.py` renderer; `test_ctx_audit_assembly_004_renderer_shows_visible_evidence`
+- [x] audit trace exposes retrieval scores, ranks, and rejection reasons sufficient to inspect why artifact A was preferred over artifact B — verified: `examples/inbox_triage_context_demo.py` shows per-artifact `Retrieval:` and `Rejected context:` with `Reason:`
+- [x] existing v0.1 workflows continue to work without retrieval instrumentation — verified: `test_ctx_led_assembly_050_backward_compatibility_v01`
+- [ ] replay reconstructs retrieved, selected, and rejected sets from events — deferred: §14.4 / §11 v0.3
+- [ ] superseded artifacts are labeled in the audit trace — deferred: §14.3 / design doc
+
+For the **end-to-end demo and resume minimum**, see §14.8. Ledger-only delivery is tracked in §14.7.
 
 The spec does NOT claim:
 
@@ -1130,25 +1132,49 @@ Those are platform features that can be built on top of these primitives.
 
 ### 14.7 v0.2a Implementation Status (June 2026)
 
-**Completed — ledger primitives and audit summary:**
+**Ledger primitives (complete):**
 
-- ✅ `retrieved` and `rejected` event types are valid `event_type` values in `ARTIFACT_EVENTS`
-- ✅ Metadata validation enforces required keys, rejects unknown keys, validates types
-- ✅ Audit trace exposes `observed_count`, `retrieved_count`, `selected_count`, `rejected_count` in summary line
-- ✅ Backward compatibility: existing v0.1 workflows without retrieved/rejected events continue to work
+- [x] `retrieved` and `rejected` event types in `ARTIFACT_EVENTS`
+- [x] Metadata validation: required keys, unknown keys, type constraints — including `metadata=None`/`{}` rejection
+- [x] Aggregate audit counts: `observed_count`, `retrieved_count`, `selected_count`, `rejected_count` in `assembly_summary`
+- [x] Backward compatibility without retrieval instrumentation
 
-**Remaining for full §14 completion:**
+**End-to-end demo (complete — see §14.8):**
 
-- ⏸️ Per-artifact retrieval metadata (method, score, rank, rejection_reason) visible in audit output for A vs B comparison
-- ⏸️ Workflow instrumentation to emit retrieved/rejected events (Gherkin scenario)
-- ⏸️ Replay reconstruction of retrieved, selected, and rejected sets
-- ⏸️ Superseded artifact labeling in audit trace
+- [x] Workflow instrumentation in `select_context`
+- [x] Per-artifact retrieval metadata in audit renderer
+- [x] Non-zero rejected count in demo with visible rejection reasons
 
-**Deferred to v0.2b (per design doc):**
+**Remaining for full §14 completion (§14.6 gates still open):**
+
+- [ ] Replay reconstruction of retrieved, selected, and rejected sets
+- [ ] Superseded artifact labeling in audit trace
+
+**Deferred (per design doc — not required for demo/resume):**
 
 The design document (`docs/superpowers/specs/2025-01-31-assembly-lineage-design.md`) explicitly deferred:
 - Superseded event type and resolution (future pass)
 - Current-state read model (future pass)
 - Retrieval table normalization (future pass)
 
-**v0.2a scope:** Ledger primitives (event types + validation) + aggregate audit counts. The workflow can record retrieved/rejected events and audit traces show summary counts, but per-artifact inspection and replay require additional implementation.
+### 14.8 End-to-End Demo Exit Gates (June 2026)
+
+Before claiming assembly lineage is **visibly demonstrated** (resume / Notion minimum — does not require §14.3 supersession or §14.4 replay):
+
+- [x] `select_context` emits `retrieved` events with `retrieval_method`, `retrieval_score`, `rank_position` — verified: `src/workflows.py`; demo output
+- [x] `select_context` emits `rejected` events with `rejection_reason` and retrieval metadata — verified: `src/workflows.py`; demo output
+- [x] Audit renderer shows per-artifact retrieval detail (`Retrieval: method/score/rank`) for selected artifacts — verified: `test_ctx_audit_assembly_004_renderer_shows_visible_evidence`
+- [x] Audit renderer shows `Rejected context:` with `Reason:` for rejected artifacts — verified: same test; demo output
+- [x] Demo produces non-zero `rejected_count` — verified: `python examples/inbox_triage_context_demo.py` → `Assembly: 64 observed, 59 retrieved, 11 selected, 48 rejected`
+- [x] `context/README.md` example matches captured demo output (counts and format, not hand-written fiction) — verified: README cites `wf-context-demo` counts and `python examples/inbox_triage_context_demo.py`
+- [x] Tests cover assembly renderer output — verified: `test_ctx_audit_assembly_004_renderer_shows_visible_evidence`, `test_assembly_lineage_tracks_retrieved_and_rejected`
+
+**Demo command:**
+
+```bash
+python examples/inbox_triage_context_demo.py
+```
+
+**Resume-safe claim once §14.8 is complete:**
+
+> Built context lineage and assembly tracing for agentic workflows, making retrieval, selection, rejection, model consumption, and decision influence auditable through local SQLite-backed traces with per-artifact scores, ranks, and rejection reasons.
