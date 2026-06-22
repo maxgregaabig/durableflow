@@ -1127,3 +1127,28 @@ The spec does NOT claim:
 - Memory lifecycle management
 
 Those are platform features that can be built on top of these primitives.
+
+### 14.7 v0.2a Implementation Status (June 2026)
+
+**Completed — ledger primitives and audit summary:**
+
+- ✅ `retrieved` and `rejected` event types are valid `event_type` values in `ARTIFACT_EVENTS`
+- ✅ Metadata validation enforces required keys, rejects unknown keys, validates types
+- ✅ Audit trace exposes `observed_count`, `retrieved_count`, `selected_count`, `rejected_count` in summary line
+- ✅ Backward compatibility: existing v0.1 workflows without retrieved/rejected events continue to work
+
+**Remaining for full §14 completion:**
+
+- ⏸️ Per-artifact retrieval metadata (method, score, rank, rejection_reason) visible in audit output for A vs B comparison
+- ⏸️ Workflow instrumentation to emit retrieved/rejected events (Gherkin scenario)
+- ⏸️ Replay reconstruction of retrieved, selected, and rejected sets
+- ⏸️ Superseded artifact labeling in audit trace
+
+**Deferred to v0.2b (per design doc):**
+
+The design document (`docs/superpowers/specs/2025-01-31-assembly-lineage-design.md`) explicitly deferred:
+- Superseded event type and resolution (future pass)
+- Current-state read model (future pass)
+- Retrieval table normalization (future pass)
+
+**v0.2a scope:** Ledger primitives (event types + validation) + aggregate audit counts. The workflow can record retrieved/rejected events and audit traces show summary counts, but per-artifact inspection and replay require additional implementation.

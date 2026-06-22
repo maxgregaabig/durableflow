@@ -2,7 +2,47 @@
 
 Visual architecture for **Durable Flow**: Python stdlib, SQLite persistence, mock model providers by default, and CLI demos.
 
-**Related docs:** [README](../README.md) (quick start) · [dflow-spec.md](dflow-spec.md) (requirements and acceptance criteria)
+**Related docs:** [README](../README.md) (quick start) · [dflow-spec.md](dflow-spec.md) (requirements and acceptance criteria) · [field-pattern.md](field-pattern.md) (deployment pattern)
+
+## Stack Overview
+
+High-level view of where DurableFlow sits between agent reasoning and production deployment.
+
+```mermaid
+flowchart TD
+    Agent[AGENT]
+
+    Planning[Planning]
+    Execution[Execution]
+
+    DurableFlow[DurableFlow]
+
+    Recovery[Recovery]
+    HITL[HITL]
+    Context[Context]
+    Eval[Eval]
+    Observability[Observability]
+
+    Production[Production]
+
+    Agent --> Planning
+    Agent --> Execution
+
+    Planning --> DurableFlow
+    Execution --> DurableFlow
+
+    DurableFlow --> Recovery
+    DurableFlow --> HITL
+    DurableFlow --> Context
+    DurableFlow --> Eval
+    DurableFlow --> Observability
+
+    Recovery --> Production
+    HITL --> Production
+    Context --> Production
+    Eval --> Production
+    Observability --> Production
+```
 
 ## How To Read This Document
 
