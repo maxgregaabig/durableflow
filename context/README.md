@@ -107,6 +107,17 @@ Or use the start script:
 
 The first demo runs inbox triage with a `ContextLedger`. The CLI renders the same audit trace without exposing backend table names.
 
+## Measure Context Selection
+
+`context.measurement` implements the baseline measurement harness described in
+`context/context-measurement-spec.md`. It evaluates frozen `ContextEvalCase`
+fixtures against the existing `ContextSelector` and reports nDCG@5, Recall@10,
+MustInclude@10, budget utilization, rejection false negatives, selector latency,
+and optional audit-completeness coverage.
+
+The harness is measurement-only: it does not replace the selector, add vector
+search, or persist raw corpus content in the rendered report.
+
 ## MVP Scope
 
 v0.2a (current) delivers assembly lineage with per-artifact metadata.
