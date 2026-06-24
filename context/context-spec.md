@@ -1119,7 +1119,7 @@ Before claiming **full** assembly lineage is implemented (§14.3–§14.4 includ
 - [ ] replay reconstructs retrieved, selected, and rejected sets from events — deferred: §14.4 / §11 v0.3
 - [ ] superseded artifacts are labeled in the audit trace — deferred: §14.3 / design doc
 
-For the **end-to-end demo and resume minimum**, see §14.8. Ledger-only delivery is tracked in §14.7.
+For the **end-to-end demo minimum**, see §14.8. Ledger-only delivery is tracked in §14.7.
 
 The spec does NOT claim:
 
@@ -1150,7 +1150,7 @@ Those are platform features that can be built on top of these primitives.
 - [ ] Replay reconstruction of retrieved, selected, and rejected sets
 - [ ] Superseded artifact labeling in audit trace
 
-**Deferred (per design doc — not required for demo/resume):**
+**Deferred (per design doc — not required for the demo minimum):**
 
 The design document (`docs/superpowers/specs/2025-01-31-assembly-lineage-design.md`) explicitly deferred:
 - Superseded event type and resolution (future pass)
@@ -1159,7 +1159,7 @@ The design document (`docs/superpowers/specs/2025-01-31-assembly-lineage-design.
 
 ### 14.8 End-to-End Demo Exit Gates (June 2026)
 
-Before claiming assembly lineage is **visibly demonstrated** (resume / Notion minimum — does not require §14.3 supersession or §14.4 replay):
+Before claiming assembly lineage is **visibly demonstrated** (does not require §14.3 supersession or §14.4 replay):
 
 - [x] `select_context` emits `retrieved` events with `retrieval_method`, `retrieval_score`, `rank_position` — verified: `src/workflows.py`; demo output
 - [x] `select_context` emits `rejected` events with `rejection_reason` and retrieval metadata — verified: `src/workflows.py`; demo output
@@ -1175,6 +1175,6 @@ Before claiming assembly lineage is **visibly demonstrated** (resume / Notion mi
 python examples/inbox_triage_context_demo.py
 ```
 
-**Resume-safe claim once §14.8 is complete:**
+**Evidence boundary once §14.8 is complete:**
 
-> Built context lineage and assembly tracing for agentic workflows, making retrieval, selection, rejection, model consumption, and decision influence auditable through local SQLite-backed traces with per-artifact scores, ranks, and rejection reasons.
+The project may state that context lineage and assembly tracing are visibly demonstrated for the inbox triage workflow: retrieval, selection, rejection, model consumption, and decision influence are auditable through local SQLite-backed traces with per-artifact scores, ranks, and rejection reasons.

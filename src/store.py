@@ -321,7 +321,7 @@ class WorkflowStore:
             row = conn.execute(query, params).fetchone()
         return int(row["count"])
 
-    def _row_to_state(self, row: sqlite3.Row) -> WorkflowState:
+    def _row_to_state(self, row: Any) -> WorkflowState:
         return WorkflowState(
             workflow_id=row["workflow_id"],
             workflow_type=row["workflow_type"],
@@ -331,3 +331,144 @@ class WorkflowStore:
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
+
+
+class PostgresRowWrapper:
+    def __init__(self, row_tuple: tuple[Any, ...], description: list[Any]):
+        self._row_tuple = row_tuple
+        self._col_map = {desc[0]: idx for idx, desc in enumerate(description)}
+
+    def __getitem__(self, key: Any) -> Any:
+        if isinstance(key, int):
+            return self._row_tuple[key]
+        if isinstance(key, str):
+            if key in self._col_map:
+                return self._row_tuple[self._col_map[key]]
+            raise KeyError(key)
+        raise TypeError(f"Index must be int or str, got {type(key)}")
+
+    def keys(self) -> list[str]:
+        return list(self._col_map.keys())
+
+    def __len__(self) -> int:
+        return len(self._row_tuple)
+
+    def __iter__(self) -> Any:
+        return iter(self._row_tuple)
+
+
+class PostgresCursorWrapper:
+    def __init__(self, cursor: Any):
+        self.cursor = cursor
+
+    def fetchone(self) -> PostgresRowWrapper | None:
+        row = self.cursor.fetchone()
+        return PostgresRowWrapper(row, self.cursor.description) if row else None
+
+    def fetchall(self) -> list[PostgresRowWrapper]:
+        rows = self.cursor.fetchall()
+        desc = self.cursor.description
+        return [PostgresRowWrapper(r, desc) for r in rows]
+
+
+class PostgresConnectionWrapper:
+    def __init__(self, pg_conn: Any):
+        self.pg_conn = pg_conn
+
+    def __enter__(self) -> PostgresConnectionWrapper:
+        self.pg_conn.__enter__()
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        try:
+            self.pg_conn.__exit__(exc_type, exc_val, exc_tb)
+        finally:
+            self.pg_conn.close()
+
+    def execute(self, query: str, params: tuple[Any, ...] = ()) -> PostgresCursorWrapper:
+        pg_query = query.replace("?", "%s")
+        cursor = self.pg_conn.cursor()
+        cursor.execute(pg_query, params)
+        return PostgresCursorWrapper(cursor)
+
+    def executescript(self, script: str) -> PostgresCursorWrapper:
+        cursor = self.pg_conn.cursor()
+        cursor.execute(script)
+        return PostgresCursorWrapper(cursor)
+
+
+class PostgresWorkflowStore(WorkflowStore):
+    def __init__(self, dsn: str):
+        self.dsn = dsn
+        self._init_schema()
+
+    def connect(self) -> PostgresConnectionWrapper:
+        try:
+            import psycopg2
+            conn = psycopg2.connect(self.dsn)
+            return PostgresConnectionWrapper(conn)
+        except ImportError:
+            try:
+                import psycopg
+                conn = psycopg.connect(self.dsn)
+                return PostgresConnectionWrapper(conn)
+            except ImportError:
+                raise ImportError(
+                    "PostgreSQL driver (psycopg2 or psycopg) is required for PostgresWorkflowStore. "
+                    "Install it using: pip install psycopg2-binary"
+                )
+
+    def _init_schema(self) -> None:
+        with self.connect() as conn:
+            conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS workflows (
+                    workflow_id     TEXT PRIMARY KEY,
+                    workflow_type   TEXT NOT NULL,
+                    current_step    INTEGER NOT NULL DEFAULT -1,
+                    step_data       TEXT NOT NULL DEFAULT '{}',
+                    status          TEXT NOT NULL DEFAULT 'pending',
+                    created_at      TEXT NOT NULL,
+                    updated_at      TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS step_results (
+                    id              SERIAL PRIMARY KEY,
+                    workflow_id     TEXT NOT NULL,
+                    step_index      INTEGER NOT NULL,
+                    step_name       TEXT NOT NULL,
+                    output          TEXT NOT NULL,
+                    duration_ms     DOUBLE PRECISION NOT NULL,
+                    cost_usd        DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+                    model_used      TEXT,
+                    created_at      TEXT NOT NULL,
+                    FOREIGN KEY (workflow_id) REFERENCES workflows(workflow_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS approval_queue (
+                    gate_id         TEXT PRIMARY KEY,
+                    workflow_id     TEXT NOT NULL,
+                    step_name       TEXT NOT NULL,
+                    payload         TEXT NOT NULL,
+                    status          TEXT NOT NULL DEFAULT 'pending',
+                    requested_at    TEXT NOT NULL,
+                    decided_at      TEXT,
+                    decided_by      TEXT,
+                    rejection_reason TEXT,
+                    FOREIGN KEY (workflow_id) REFERENCES workflows(workflow_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS side_effect_log (
+                    idempotency_key TEXT PRIMARY KEY,
+                    workflow_id     TEXT NOT NULL,
+                    step_name       TEXT NOT NULL,
+                    result          TEXT NOT NULL,
+                    executed_at     TEXT NOT NULL,
+                    FOREIGN KEY (workflow_id) REFERENCES workflows(workflow_id)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_workflows_status ON workflows(status);
+                CREATE INDEX IF NOT EXISTS idx_approval_status ON approval_queue(status);
+                CREATE INDEX IF NOT EXISTS idx_step_results_workflow ON step_results(workflow_id);
+                """
+            )

@@ -158,7 +158,8 @@ class AgentRunner:
                     [ContextItem("history", prompt, "agent", "", estimate_tokens(prompt))],
                     self.token_budget,
                 )
-                prompt = selected[0].content if selected else " ".join(prompt.split()[: self.token_budget])
+                selected_items = selected.selected_items
+                prompt = selected_items[0].content if selected_items else " ".join(prompt.split()[: self.token_budget])
             response = ModelRouter().route(prompt, "Reason over the next support-agent action.", self.routing_policy)
             telemetry: TelemetryLogger = dependencies["telemetry"]
             if response.was_fallback:
