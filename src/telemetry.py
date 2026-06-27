@@ -5,7 +5,7 @@ import sys
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, TextIO
+from typing import Any, Protocol, TextIO, runtime_checkable
 
 
 @dataclass(frozen=True)
@@ -32,16 +32,30 @@ class WorkflowEvent:
         }
 
 
+@runtime_checkable
+class TelemetrySink(Protocol):
+    """A composable downstream consumer of telemetry events.
+
+    Sinks are best-effort: failures must never propagate into workflow
+    execution (``TelemetryLogger`` swallows and warns on sink exceptions).
+    Implementations that perform network I/O must be non-blocking.
+    """
+
+    def emit(self, event: dict[str, Any]) -> None: ...
+
+
 class TelemetryLogger:
     def __init__(
         self,
         path: str | Path | None = None,
         stream: TextIO | None = None,
         echo: bool = True,
+        sinks: list[TelemetrySink] | None = None,
     ):
         self.path = Path(path) if path else None
         self.stream = stream if stream is not None else sys.stdout
         self.echo = echo
+        self.sinks = sinks or []
         self.events: list[dict[str, Any]] = []
         if self.path and self.path.exists():
             self.path.unlink()
@@ -55,6 +69,14 @@ class TelemetryLogger:
         if self.path:
             with self.path.open("a", encoding="utf-8") as handle:
                 handle.write(line + "\n")
+        for sink in self.sinks:
+            try:
+                sink.emit(payload)
+            except Exception as exc:  # noqa: BLE001 - sinks must never fail a workflow
+                print(
+                    f"[telemetry] sink {type(sink).__name__} failed: {exc}",
+                    file=sys.stderr,
+                )
 
     def log_event(
         self,

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import sys
 import time
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, Callable
+from typing import Any, Callable, Protocol, runtime_checkable
 
 from .store import StepResult, WorkflowState, WorkflowStatus, WorkflowStore
 from .telemetry import TelemetryLogger
@@ -28,6 +29,19 @@ class ApprovalRejectionPolicy(StrEnum):
 class WorkflowStep:
     name: str
     fn: StepFunction
+
+
+@runtime_checkable
+class ContextExporter(Protocol):
+    """Generic context-lineage export hook.
+
+    Invoked by the engine after each step's context decisions are linked, and
+    once at workflow completion. The engine depends only on this protocol; the
+    LangSmith implementation is one provider and is never imported here. Export
+    failures MUST be swallowed by the engine so they never affect execution.
+    """
+
+    def export_incremental(self, *, workflow_id: str, step_name: str, context_ledger: Any) -> None: ...
 
 
 class WorkflowEngine:
@@ -232,8 +246,27 @@ class WorkflowEngine:
             index += 1
 
         self.store.update_status(workflow_id, WorkflowStatus.COMPLETED)
+        self._run_context_export_final(workflow_id)
         self.telemetry.log_workflow_complete(workflow_id)
         return self.store.load_workflow(workflow_id)
+
+    def _run_context_export_final(self, workflow_id: str) -> None:
+        """Final best-effort context export at completion (spec §10.3)."""
+        ledger = self.dependencies.get("context_ledger")
+        exporters = self.dependencies.get("context_exporters") or []
+        if ledger is None or not isinstance(exporters, (list, tuple)):
+            return
+        for exporter in exporters:
+            final = getattr(exporter, "export_final", None)
+            if final is None:
+                continue
+            try:
+                final(workflow_id=workflow_id, context_ledger=ledger)
+            except Exception as exc:  # noqa: BLE001 - exporters must never fail execution
+                print(
+                    f"[engine] context exporter {type(exporter).__name__} final failed: {exc}",
+                    file=sys.stderr,
+                )
 
     def _link_context_decisions(
         self,
@@ -245,3 +278,21 @@ class WorkflowEngine:
         if ledger is None or not hasattr(ledger, "link_decisions_to_step_result"):
             return
         ledger.link_decisions_to_step_result(workflow_id, step_name, step_index)
+        # Generic context-export fan-out (spec §10.3). Best-effort: failures are
+        # swallowed and warned, never raised into execution. The engine imports
+        # no LangSmith code; providers live in `dependencies["context_exporters"]`.
+        exporters = self.dependencies.get("context_exporters") or []
+        if not isinstance(exporters, (list, tuple)):
+            return
+        for exporter in exporters:
+            try:
+                exporter.export_incremental(
+                    workflow_id=workflow_id,
+                    step_name=step_name,
+                    context_ledger=ledger,
+                )
+            except Exception as exc:  # noqa: BLE001 - exporters must never fail execution
+                print(
+                    f"[engine] context exporter {type(exporter).__name__} failed: {exc}",
+                    file=sys.stderr,
+                )

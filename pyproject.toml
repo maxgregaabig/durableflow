@@ -37,6 +37,10 @@ vast = []
 mcp = ["mcp==1.13.1"]
 adk = ["google-adk==1.18.0"]
 dev = ["pytest==8.4.2"]
+# Bounded range: the lower bound is the validated floor, the upper bound guards
+# against a breaking 2.x. Live LangSmith SDK conformance is tracked as
+# C-LSMITH-DEFER-001 (DEFERRED-VERIFICATION) in docs/langsmith-adapter.md.
+langsmith = ["langsmith>=1.2,<2.0"]
 
 [project.urls]
 Homepage = "https://github.com/marcospolanco/durableflow"
@@ -46,7 +50,7 @@ Issues = "https://github.com/marcospolanco/durableflow/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["src*", "colony*", "agent*", "readiness*", "planner*", "mcp_server*", "context*", "factory*"]
+include = ["src*", "colony*", "agent*", "readiness*", "planner*", "mcp_server*", "context*", "factory*", "integrations*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
