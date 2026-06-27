@@ -35,7 +35,8 @@ Add an optional extra:
 
 ```toml
 [project.optional-dependencies]
-langsmith = ["langsmith>=0.1"]
+# Example only; set the actual range after Phase 2 SDK validation.
+langsmith = ["langsmith>=1.2,<2.0"]
 ```
 
 Add a small adapter module:
@@ -49,6 +50,8 @@ integrations/
 The adapter should be import-safe when LangSmith is not installed. Import errors should occur only when constructing the LangSmith exporter without the optional dependency.
 
 The generic sink protocol belongs in `src/telemetry.py`. The LangSmith-specific implementation belongs in `integrations/langsmith_adapter.py` so core telemetry imports stay free of optional SDK checks.
+
+The bounded version range is intentional. The exact lower and upper SDK versions should be set after the Phase 2 API validation spike proves root-run update or deterministic linked segment behavior. For example, if validation is done against a stable 1.x SDK, the extra should use a bounded range such as `langsmith>=1.2,<2.0`. SDK compatibility should be tested in CI for the pinned range before widening it.
 
 ## Configuration
 
@@ -64,6 +67,14 @@ Suggested environment variables:
 | `DURABLEFLOW_RUN_URL_BASE` | Optional base URL for linking back to an internal DurableFlow run viewer. |
 
 The default behavior should be disabled. A missing API key should not affect workflow execution.
+
+`DURABLEFLOW_RUN_URL_BASE` is used only to build metadata links back to a local or internal DurableFlow run viewer, for example:
+
+```text
+{DURABLEFLOW_RUN_URL_BASE.rstrip("/")}/workflows/{workflow_id}
+```
+
+Invalid API keys, expired credentials, or forbidden projects should disable export after the first failed authentication attempt in a process. The workflow should continue, the adapter should increment an auth-failure counter, and later `emit()` calls should become no-ops unless the process is reconfigured or restarted.
 
 ## Integration Points
 
@@ -100,6 +111,12 @@ With this shape, `src.telemetry` defines only the generic protocol and fan-out b
 For LangSmith specifically, `LangSmithTelemetrySink.emit()` must be non-blocking. It should enqueue events into a bounded in-process queue and return immediately. Network I/O should happen through the LangSmith SDK's background facilities when available, or through a small worker thread / executor owned by the adapter. The workflow execution thread must not wait on LangSmith HTTP calls during step execution, approval handling, checkpointing, or crash recovery.
 
 If the queue is full, the adapter should drop the export event, increment a dropped-event counter, and emit a local warning. It should not apply backpressure to DurableFlow execution.
+
+For multi-workflow parallelism, the queue is process-wide by default. Each queued item must include `workflow_id`, root run UUID, and step/run identifiers so events from concurrent workflows can be demultiplexed by the worker. The default queue should be bounded by item count and approximate serialized byte size to avoid one workflow starving the process with large metadata. Recommended defaults:
+
+- `max_items`: 1000
+- `max_event_bytes`: 64 KiB after redaction
+- overflow policy: drop newest event, increment `dropped_events`, and keep workflow execution moving
 
 ### 2. Workflow Run Mapping
 
@@ -152,6 +169,22 @@ Fallbacks should not become top-level child spans. A fallback is a routing event
 - one failed model attempt event or LLM sub-run
 - one fallback model attempt event or LLM sub-run
 - routing metadata on the parent step, including `from_model`, `to_model`, and redacted error category
+
+Example fallback event payload:
+
+```json
+{
+  "event_type": "model_fallback",
+  "workflow_id": "wf-context-demo",
+  "step_name": "triage_llm",
+  "metadata": {
+    "from_model": "primary-model",
+    "to_model": "fallback-model",
+    "error_category": "rate_limit",
+    "error_digest": "sha256:..."
+  }
+}
+```
 
 ### 3. Context Lineage Export
 
@@ -231,6 +264,70 @@ The exported dataset should use a stable schema compatible with LangSmith evalua
 
 This schema lets evaluators compare workflow outcomes, routing choices, and context-selection behavior without requiring raw prompts or raw retrieved content. A future raw-data dataset mode would require an explicit opt-in and separate compliance review.
 
+Example dataset row:
+
+```json
+{
+  "inputs": {
+    "workflow_id": "wf-context-demo",
+    "step_name": "triage_llm",
+    "fixture_ref": "inbox_triage:case_007",
+    "context_digest_set": [
+      "sha256:018b...",
+      "sha256:a91d..."
+    ],
+    "context_summary": {
+      "selected_count": 2,
+      "rejected_count": 3,
+      "artifacts": [
+        {
+          "artifact_role": "source_artifact",
+          "source_type": "email",
+          "rank_position": 1,
+          "retrieval_score": 0.82,
+          "content_digest": "sha256:018b..."
+        },
+        {
+          "artifact_role": "source_artifact",
+          "source_type": "calendar",
+          "rank_position": 2,
+          "retrieval_score": 0.67,
+          "content_digest": "sha256:a91d..."
+        }
+      ]
+    }
+  },
+  "outputs": {
+    "expected_status": "completed",
+    "expected_decision_label": "needs_human_review",
+    "expected_side_effect": "approval_requested"
+  },
+  "metadata": {
+    "model_used": "mock-primary",
+    "cost_usd": 0.00042,
+    "token_counts": {"input": 1420, "output": 96},
+    "lineage_counts": {
+      "observed": 5,
+      "selected": 2,
+      "rejected": 3,
+      "consumed": 2,
+      "influential": 1
+    },
+    "seed": 1337
+  }
+}
+```
+
+`context_summary` should never contain raw text. It is limited to counts, roles, source types, ranks, scores, and digests.
+
+## Archival, Deletion, And Backfill
+
+LangSmith traces are retained independently of local SQLite. Deleting a local DurableFlow workflow or SQLite database does not cascade deletion to LangSmith. The adapter should document that LangSmith retention, deletion, and access control are governed by the target LangSmith project.
+
+DurableFlow remains the local source of truth while the SQLite record exists. LangSmith can be a long-term observation record, but it is not authoritative for replay, approval state, or side-effect idempotency.
+
+Backfill should be explicit. Manual export functions may read historical SQLite workflows and export redacted traces or datasets, but they must mark payloads with `export_mode: "backfill"` and preserve original workflow timestamps when available. Backfill should use the same deterministic UUID mapping so historical exports do not duplicate existing LangSmith runs.
+
 ## Failure Semantics
 
 LangSmith export is best-effort:
@@ -244,6 +341,16 @@ LangSmith export is best-effort:
 - Local SQLite remains the source of truth for audit and recovery.
 
 The adapter should expose counters or warning events for failed exports so users know when traces are incomplete.
+
+Retry policy:
+
+- max attempts per export item: 3
+- backoff: exponential, starting at 250 ms
+- jitter: small random jitter to avoid synchronized retries
+- ceiling: 10 seconds between attempts
+- final failure: drop the item, increment `failed_exports`, and retain no side-effect replay obligation
+
+Persistent local retry queues are out of scope for the first adapter. The first implementation should use only an in-memory queue. A disk-backed queue would create retention, encryption, cleanup, and PII-risk questions that should be handled in a separate proposal.
 
 ## Redaction Policy
 
@@ -280,6 +387,8 @@ Default-redacted fields:
 Optional mode: `metadata`.
 
 This mode may export selected metadata fields such as inbox category, retrieval method, or workflow labels. It still should not export raw prompts or responses unless a future explicit `raw` mode is added with clear warnings.
+
+Metadata export must be allow-list based. The adapter should not pass arbitrary `metadata` dictionaries through to LangSmith, even in `metadata` mode. Unknown keys should be dropped by default, and string values should be capped at a small size such as 512 bytes after redaction. Oversized metadata values should be replaced with a digest and a `truncated: true` marker. This prevents metadata injection from leaking PII/PHI or exhausting queue memory.
 
 ## Example Usage
 
@@ -336,6 +445,51 @@ Add tests that do not require network access:
 
 Networked LangSmith behavior should be covered by a small optional integration test gated behind an environment variable, for example `DURABLEFLOW_LANGSMITH_INTEGRATION=1`.
 
+Unit tests should use a fake client with a minimal LangSmith-like interface:
+
+```python
+class FakeLangSmithClient:
+    def __init__(self):
+        self.created_runs = []
+        self.updated_runs = []
+        self.events = []
+
+    def create_run(self, *, id, name, run_type, project_name, inputs=None, extra=None, parent_run_id=None):
+        self.created_runs.append(
+            {
+                "id": id,
+                "name": name,
+                "run_type": run_type,
+                "project_name": project_name,
+                "inputs": inputs or {},
+                "extra": extra or {},
+                "parent_run_id": parent_run_id,
+            }
+        )
+
+    def update_run(self, run_id, *, outputs=None, error=None, end_time=None, extra=None):
+        self.updated_runs.append(
+            {
+                "run_id": run_id,
+                "outputs": outputs or {},
+                "error": error,
+                "end_time": end_time,
+                "extra": extra or {},
+            }
+        )
+
+    def log_event(self, run_id, *, name, payload):
+        self.events.append({"run_id": run_id, "name": name, "payload": payload})
+```
+
+Concrete unit cases:
+
+- Non-blocking enqueue: inject a fake client whose network methods sleep, call `emit()`, and assert the call returns within a small local threshold while the worker handles the item asynchronously.
+- Queue overflow: configure `max_items=1`, emit two events, assert one is queued or exported and `dropped_events == 1`.
+- Invalid credentials: fake an auth error on the first client call, assert export disables itself and later `emit()` calls do not raise.
+- Metadata sanitization: pass a metadata dict with unknown keys, a 10 MB string, an email address, and a token-like value; assert only allow-listed fields, digests, and truncation markers are exported.
+- Parallel workflows: emit interleaved events for two workflow IDs and assert generated run IDs and child IDs remain distinct.
+
 ## Implementation Phases
 
 ### Phase 1: Local Sink Interface
@@ -351,6 +505,7 @@ Networked LangSmith behavior should be covered by a small optional integration t
 - Validate the selected LangSmith SDK API for reopening deterministic root runs or creating deterministic linked segment runs.
 - Add `integrations.langsmith_adapter`.
 - Add optional `langsmith` dependency extra.
+- Add a compatibility note documenting the validated LangSmith SDK version range.
 - Dynamically import the LangSmith SDK inside the adapter.
 - Add bounded asynchronous export queue.
 - Add deterministic UUIDv5 run-ID mapping.
@@ -369,6 +524,7 @@ Networked LangSmith behavior should be covered by a small optional integration t
 
 - Add `context.cli` support for creating LangSmith datasets from selected DurableFlow runs.
 - Start with deterministic examples only.
+- Implement the documented dataset schema and example shape.
 - Document how teams can attach evaluators outside the core runtime.
 
 ## Resolved Design Decisions
@@ -378,8 +534,11 @@ Networked LangSmith behavior should be covered by a small optional integration t
 - The generic `TelemetrySink` protocol should live in `src/telemetry.py`; LangSmith-specific code should live in `integrations/langsmith_adapter.py`.
 - Core code should never import the LangSmith adapter; optional user setup or CLI code should lazy-import it only when enabled.
 - The default `digest_only` export should include operational metadata, digests, counts, ranks, and scores while redacting raw user text and raw model I/O.
+- Metadata export should be allow-list based, size-capped, and sanitized before enqueue.
 - Context audit export should be incremental after every decision, with a final completion export, triggered by a generic orchestration hook after `ContextLedger` decision linking.
 - `model_fallback` should be represented as metadata or a custom event inside the current step span, with optional model-attempt sub-runs under that same step.
+- LangSmith retention is independent of local SQLite deletion; local deletion does not cascade to LangSmith.
+- The first adapter should use in-memory retry only; persistent export queues are out of scope.
 
 ## Remaining Open Questions
 
