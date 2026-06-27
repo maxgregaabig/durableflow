@@ -50,7 +50,7 @@ Issues = "https://github.com/marcospolanco/durableflow/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["src*", "colony*", "agent*", "readiness*", "planner*", "mcp_server*", "context*", "factory*", "integrations*"]
+include = ["src*", "colony*", "agent*", "readiness*", "planner*", "mcp_server*", "context*", "factory*", "integrations*", "evals*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
