@@ -54,7 +54,7 @@ A minimal Python runtime for multi-step LLM and agentic workflows. It demonstrat
 
 It is not another assistant framework. It is the small operational layer underneath one.
 
-See **[docs/dflow-arch.md](docs/dflow-arch.md)** for diagrams and invariants.
+See **[docs/dflow-arch.md](docs/dflow-arch.md)** for diagrams and invariants. For a full-repo architectural walkthrough (why each package exists and how extensions fit), see **[docs/walkthrough.md](docs/walkthrough.md)**.
 
 ## Extension: Colony
 

@@ -4,6 +4,7 @@ Start here after running `./start.sh crash` from the repo root.
 
 | Document | Audience | Purpose |
 |----------|----------|---------|
+| [walkthrough.md](walkthrough.md) | New contributors / reviewers | Architectural throughline plus **canonical index of all 9 `*-spec.md` and 7 `README.md` files** |
 | [exercises.md](exercises.md) | Learners | Hands-on tasks to explore durability, approval, routing, and idempotency |
 | [dflow-arch.md](dflow-arch.md) | Reviewers / contributors | Stack overview, architecture diagrams, and runtime invariants |
 | [dflow-spec.md](dflow-spec.md) | Implementers | Full specification, acceptance criteria, and test plan |
