@@ -49,8 +49,8 @@ A minimal Python runtime for multi-step LLM and agentic workflows. It demonstrat
 - **Crash recovery** — real process kill (`os._exit`) in a subprocess, not mocked exceptions
 - **Approval gates** — pause until an operator approves or rejects; persists across restart
 - **Model routing** — primary/secondary fallback with per-step USD cost accounting
-- **Context selection** — TF-IDF ranking under a hard token budget (4096 in inbox triage)
-- **Idempotency** — side-effect log prevents duplicate send on crash/retry
+- **Context selection** — TF-IDF ranking under a caller-supplied hard token budget (300 in the reference workflow; tested at 4096)
+- **Replay suppression** — deterministic keys let the side-effect log reuse mock-send results
 
 It is not another assistant framework. It is the small operational layer underneath one.
 
@@ -238,7 +238,7 @@ TF-IDF is used instead of embeddings because this repo is about operational prim
 
 Mock providers are the default so demos and tests run on a clean machine. Optional Anthropic integration is gated by `ANTHROPIC_API_KEY` and the `providers` extra.
 
-Side effects use deterministic idempotency keys. Before the mock email send runs, the workflow checks the side-effect log. If recovery replays the send step after a crash, the existing result is returned and the email is not sent twice.
+The mock send uses a deterministic idempotency key. It checks the side-effect log before constructing and persisting a new mock result; recovery reuses an existing result. This demonstrates local replay suppression, not atomic exactly-once delivery to a remote email service. A real adapter must pass the key to a service that honors it or use an outbox/reconciliation design.
 
 Token counting is approximate: whitespace word count divided by 0.75. A production implementation would use a tokenizer matched to the target model.
 

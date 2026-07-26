@@ -60,8 +60,8 @@ Each section is a Mermaid diagram plus brief prose. The diagrams describe **what
 
 1. **Checkpoint after every completed step** — `save_checkpoint()` writes to `step_results` and merges output into `step_data` before the next step runs.
 2. **Pause on human gate** — a step returning `PauseForApproval` persists a pending checkpoint and sets `paused_approval`; execution stops until `resume()`.
-3. **Idempotency before side effects** — `send_reply` checks `side_effect_log` before executing; duplicate keys return the logged result.
-4. **Hard token budget** — `ContextSelector` never returns items whose summed `token_count` exceeds the budget (4096 in inbox triage).
+3. **Local replay suppression for the mock send** — `send_reply` checks `side_effect_log` before constructing a new mock result; duplicate keys return the logged result. Remote exactly-once delivery requires downstream idempotency or an outbox/reconciliation design.
+4. **Hard token budget** — `ContextSelector` never returns items whose summed `token_count` exceeds the caller-supplied budget (300 in the reference workflow; 4096 in the large-corpus acceptance test).
 5. **No in-memory-only workflow state** — all durable state lives in SQLite (`workflows`, `step_results`, `approval_queue`, `side_effect_log`).
 
 SQLite uses WAL mode and `PRAGMA busy_timeout = 30000` for local durability. There is no concurrent multi-workflow execution in this reference runtime.
@@ -187,7 +187,7 @@ sequenceDiagram
 
     Engine->>Telemetry: log_step_start(select_context)
     Engine->>Steps: select_context()
-    Steps->>Selector: select(query, corpus, budget=4096)
+    Steps->>Selector: select(query, corpus, budget=300)
     Selector-->>Steps: ranked ContextItems
     Steps-->>Engine: StepResult(context)
     Engine->>Store: save_checkpoint(index 1)
@@ -415,7 +415,7 @@ flowchart TD
     Scores --> Sort[Sort by score descending]
     Sort --> Pack[Greedy budget packing]
     TokenCounts --> Pack
-    Budget[4096 token budget in inbox triage] --> Pack
+    Budget[Caller-supplied token budget<br/>300 in reference workflow] --> Pack
     Pack --> Selected[Selected context]
     Selected --> Constraint{sum token_count <= budget}
 ```
@@ -433,8 +433,8 @@ flowchart TD
     HashPayload --> Key[sha256 workflow_id step_name payload_hash]
     Key --> Lookup{side_effect_log contains key?}
     Lookup -- yes --> Existing[Return logged result idempotent_skip=true]
-    Lookup -- no --> SideEffect[Execute mock send]
-    SideEffect --> Log[Write side_effect_log]
+    Lookup -- no --> MockResult[Construct mock send result]
+    MockResult --> Log[Write side_effect_log]
     Log --> Result[Return sent result]
 ```
 

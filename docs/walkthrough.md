@@ -4,6 +4,26 @@
 
 **Purpose:** Explain why each part of the repository exists, how it was implemented, and how the pieces fit together through a single architectural throughline. This document is also the **canonical index** for every `*-spec.md` and `README.md` in the repo (9 specs, 7 READMEs).
 
+## Start Here
+
+### What you should understand after reading
+
+You do not need to memorize every package. A successful first pass leaves you able to answer five questions:
+
+1. What failure is DurableFlow designed to survive?
+2. What exactly is persisted after each step, and where?
+3. How do approval and side-effect state differ from workflow execution state?
+4. Why is inbox triage the reference workflow rather than the product?
+5. Which repository areas are implemented proof tracks, deployment sketches, or draft specifications?
+
+### Choose a route
+
+- **Ten-minute orientation:** read [The Throughline](#the-throughline), [Why the Core Exists](#why-the-core-exists), and [Follow One Run](#follow-one-run). Then stop.
+- **Learn by running the code:** use [learning-path.md](learning-path.md), which pairs selected parts of this document with demos, source, predictions, and verification gates.
+- **Look up a package or contract:** jump to [Extension Tracks](#extension-tracks-and-how-they-fit) or the [Reference Appendix](#reference-appendix).
+
+This file is both an orientation and a reference. The opening sections build the runtime mental model; later sections widen into optional tracks and exhaustive indexes.
+
 **Related:** [README](../README.md) (quick start) · [dflow-arch.md](dflow-arch.md) (diagrams) · [durable-flow-overview.md](../durable-flow-overview.md) (product portfolio) · [docs/README.md](README.md) (supplementary doc index)
 
 ---
@@ -14,15 +34,17 @@ Most agent demos optimize for intelligence — prompts, tools, retrieval, and an
 
 Everything in this repository hangs off one pattern:
 
-> **Wrap agentic work in a durable shell.** Checkpoint after every completed unit of progress. Persist operator decisions separately from execution state. Guard side effects with idempotency keys. Emit structured telemetry. Then add optional proof tracks that answer adjacent operational questions (compute reliability, deployability, information lineage, spend control, typed data flow, post-run evaluation).
+> **Wrap agentic work in a durable shell.** Checkpoint after every completed unit of progress. Persist operator decisions separately from execution state. Guard retries with deterministic idempotency keys. Emit structured telemetry. Then add optional proof tracks that answer adjacent operational questions (compute reliability, deployability, information lineage, spend control, typed data flow, post-run evaluation).
 
 The inbox triage workflow is not the product. It is the **reference vehicle** that makes the shell concrete. Extensions reuse the same primitives (`WorkflowStore`, checkpoint semantics, telemetry, model routing) but ask different questions.
+
+One boundary matters from the start: the reference workflow demonstrates **local replay suppression for a mock send**, not atomic exactly-once delivery to a remote email service. A production adapter must pass the idempotency key to a downstream service that honors it, or use an outbox/reconciliation design. A local SQLite record cannot by itself make a network effect atomic.
 
 ---
 
 ## Architectural Layers
 
-Think of the repo as four concentric layers:
+Think of the repo as four stacked layers:
 
 ```text
 ┌─────────────────────────────────────────────────────────────────┐
@@ -61,7 +83,7 @@ Production assistant workflows fail operationally long before they fail intellec
 |-----------------|----------------|--------|
 | Partial failure mid-workflow | Checkpoint after each step; resume from last index | `src/engine.py`, `src/store.py` |
 | Unsafe or user-facing actions | Pause on `PauseForApproval`; persist gate in SQLite | `src/approval.py` |
-| Duplicate side effects on retry | Idempotency key in `side_effect_log` before execute | `src/workflows.py` (`send_reply`) |
+| Duplicate mock side effects on retry | Deterministic key lookup + persisted mock result | `src/workflows.py` (`send_reply`) |
 | Provider timeout / 5xx | Primary → secondary fallback with cost accounting | `src/model_router.py` |
 | Context corpus exceeds model window | TF-IDF rank + greedy pack under hard token budget | `src/context_selector.py` |
 | Non-deterministic path audit | JSONL telemetry for steps, crashes, fallback, approvals | `src/telemetry.py` |
@@ -70,7 +92,7 @@ Production assistant workflows fail operationally long before they fail intellec
 
 The core follows a deliberately small contract:
 
-1. **`WorkflowStore`** owns all durable state: `workflows`, `step_results`, `approval_queue`, `side_effect_log`. WAL mode SQLite; optional `PostgresWorkflowStore` for the AWS sketch.
+1. **`WorkflowStore`** owns the core durable state: `workflows`, `step_results`, `approval_queue`, `side_effect_log`. WAL mode SQLite; optional `PostgresWorkflowStore` for the AWS sketch.
 2. **`WorkflowEngine`** is a **linear step runner**. It registers `(name, fn)` pairs, runs from `current_step + 1`, checkpoints after each completed step, and stops on `PauseForApproval`.
 3. **Step functions** receive `(WorkflowState, step_data, dependencies)` and return `StepResult` or `PauseForApproval`. They are registered by demos/extensions — the engine does not import workflow logic.
 4. **Two status layers:** `workflows.status` (execution) vs `approval_queue.status` (operator decision). Approve/reject updates the queue; `resume()` reads it and updates workflow status.
@@ -96,10 +118,12 @@ ingest_email → select_context → triage_llm → draft_reply → approval_gate
 **How it connects:**
 
 - Mock corpus from `data/mock_emails.json` and `data/mock_calendar.json`
-- `ContextSelector.select()` packs prior emails/events under a hard budget; the inbox context demo currently uses `token_budget=300` so selected/rejected lineage is easy to inspect, while budget behavior is also tested at 4096 tokens
+- `ContextSelector.select()` ranks prior emails/events using term frequency × smoothed inverse document frequency, then greedily packs them under a hard budget; the inbox context demo currently uses `token_budget=300` so selected/rejected lineage is easy to inspect, while budget behavior is also tested at 4096 tokens
 - `ModelRouter.route()` calls mock providers by default; optional Anthropic via `ANTHROPIC_API_KEY`
-- Informational emails skip draft, approval, and send
+- Informational emails still pass through all six linear steps, but the draft, approval, and send steps return checkpointed `skipped` results instead of doing their normal work
 - When a `ContextLedger` is injected via dependencies, steps record observed/retrieved/selected/rejected/consumed events and explicit decision lineage (Context extension)
+
+**Naming note:** `ContextSelector` currently serializes `retrieval_method="bm25"`, but `_score_relevance()` implements the simpler term-frequency × smoothed-IDF calculation described above. Treat `bm25` as a metadata-label mismatch, not as the implemented algorithm.
 
 **Entry points:**
 
@@ -109,6 +133,84 @@ ingest_email → select_context → triage_llm → draft_reply → approval_gate
 | `examples/inbox_triage_demo.py` | Golden path + interactive approval |
 | `examples/inbox_triage_context_demo.py` | Inbox triage + context audit trace |
 | `./start.sh` | Wrapper for crash, inbox, context, readiness, mcp, test |
+
+---
+
+## Follow One Run
+
+The fastest way to understand the repository is to follow one action-required email through the two durable boundaries: **step checkpointing** and **approval**.
+
+The engine is linear. It does not jump over registered steps. Each ordinary step returns a `StepResult`; the engine merges that output into `workflows.step_data`, appends a `step_results` row, advances `current_step`, and commits those changes together in `save_checkpoint()`.
+
+| Moment | `current_step` | Workflow status | Other durable evidence | What happens next |
+|--------|---------------:|-----------------|------------------------|-------------------|
+| Workflow created | `-1` | `pending` | Initial input in `step_data` | `execute()` marks it running |
+| `ingest_email` through `draft_reply` complete | `3` | `running` | Four step-result rows; outputs accumulated in `step_data` | Run `approval_gate` |
+| Approval requested | `4` | `paused_approval` | Pending gate in `approval_queue`; a pending result at step 4 | Return control to the caller |
+| Operator approves | `4` | `paused_approval` | `approval_queue.status = approved` with actor/time | A later `resume()` reads the decision |
+| Engine processes approval | `4` | `approved → running` | Approved result appended at step 4; `step_data["approval_gate"]` replaces the pending view | Run `send_reply` |
+| Mock send completes | `5` | `completed` | Deterministic result in `side_effect_log`; send result checkpointed | Emit completion telemetry |
+
+Two details are easy to miss:
+
+1. **A pause is itself checkpointed.** Step 4 has not completed its business decision, but the engine persists where and why it stopped. Approval later appends the decided result at the same step index and replaces that step's accumulated output.
+2. **Operator and engine state move independently.** `ApprovalGate.approve()` changes the queue row; it does not execute the workflow. `WorkflowEngine.resume()` consumes that durable decision and continues.
+
+### Follow the crash demo
+
+The crash demo exercises the repository's headline path with a real subprocess exit during `triage_llm`:
+
+| Moment | `current_step` | Workflow status | Durable evidence | Why |
+|--------|---------------:|-----------------|------------------|-----|
+| Workflow created | `-1` | `pending` | No step-result rows | Nothing has run |
+| `ingest_email` and `select_context` complete | `1` | `running` | Results for indexes 0 and 1 | Both returned and checkpointed |
+| Child process dies during `triage_llm` | `1` | `running` | No result for index 2 | `os._exit` bypasses exception handling and checkpointing |
+| Parent marks the abandoned run stale and calls `recover_crashed()` | `1` | `crashed` | Crash telemetry; prior checkpoints unchanged | Detection reclassifies stale `running` state but does not resume it |
+| Caller invokes `resume()` | `1 → 4` | `running → paused_approval` | Steps 2–3 checkpoint; step 4 records the pending gate | Resume starts at `current_step + 1`, so indexes 0–1 are not repeated |
+| Demo approves and resumes again | `4 → 5` | `paused_approval → completed` | Approval result, mock side-effect result, and send checkpoint | The final registered step completes |
+
+**Crash and failure are different states.** A hard process exit leaves the workflow `running` until stale-run detection marks it `crashed`. A normal Python exception is caught by the engine, which marks the workflow `failed` and re-raises without checkpointing that step. An explicit `resume()` retries either state from the last completed index; recovery is never an invisible background action.
+
+### All workflow statuses
+
+| Status | Meaning |
+|--------|---------|
+| `pending` | Created but not executing |
+| `running` | A caller is executing or resuming steps |
+| `paused_approval` | Execution stopped on a durable human gate |
+| `approved` | Transient resume state after an approved decision is checkpointed |
+| `rejected` | Terminal under the default rejection policy |
+| `completed` | All registered steps checkpointed |
+| `failed` | A step raised an exception caught by the engine |
+| `crashed` | A stale `running` workflow was detected after process loss |
+
+### The external side-effect boundary
+
+For pure computation, rerunning one uncheckpointed step is the intended recovery behavior. For an external side effect, there is an additional boundary:
+
+```text
+remote effect happens ──────────────> local checkpoint commits
+                    crash window
+```
+
+The mock `send_reply` demonstrates that a repeated call can reuse a locally persisted result. A real email, payment, or CRM adapter must also make the remote operation idempotent; otherwise a crash can occur after the remote system acted but before local state records success.
+
+### Verify the model
+
+Run the interactive path and enter `y` when prompted. The query below describes that approval branch:
+
+```bash
+./start.sh inbox
+sqlite3 examples/inbox_triage_demo.sqlite \
+  "SELECT current_step, status FROM workflows;
+   SELECT step_index, step_name FROM step_results ORDER BY id;
+   SELECT status, decided_by FROM approval_queue;
+   SELECT step_name, idempotency_key FROM side_effect_log;"
+```
+
+Before running the query, predict why step index `4` appears twice while there are only six unique registered steps. If you can explain that and why `current_step` ends at `5`, you have the core checkpoint model.
+
+Then rerun `./start.sh inbox` and reject the draft. Predict the differences before querying: the workflow should end at step `4` with status `rejected`, and `side_effect_log` should contain zero rows. The demo resets its SQLite file on each run, so the two branches do not contaminate each other.
 
 ---
 
@@ -298,92 +400,62 @@ Extensions are **sibling packages** that share the core ethos (local-first, dete
 End-to-end path for the richest local demo:
 
 ```mermaid
-flowchart TD
-    A[inbox_triage_context_demo.py] --> B[WorkflowStore SQLite]
-    A --> C[WorkflowEngine]
-    A --> D[InboxTriageWorkflow]
+sequenceDiagram
+    participant Demo as context demo
+    participant Engine as WorkflowEngine
+    participant Workflow as InboxTriageWorkflow
+    participant Gate as ApprovalGate
+    participant Store as WorkflowStore / SQLite
+    participant Ledger as ContextLedger
+    participant Telemetry as JSONL telemetry
 
-    D --> D1[ContextSelector<br/>TF-IDF + budget]
-    D --> D2[ModelRouter<br/>fallback + cost]
-    D --> D3[ApprovalGate<br/>human gate]
+    Demo->>Store: create_workflow(initial input)
+    Demo->>Engine: execute(workflow_id)
 
-    A --> E[ContextLedger<br/>same DB file]
-    A --> F[TelemetryLogger → *.jsonl]
-    A --> G[context.cli audit<br/>human-readable trail]
+    loop until paused or complete
+        Engine->>Store: load durable state
+        Engine->>Workflow: step(state, step_data, dependencies)
+        opt context-aware step
+            Workflow->>Ledger: record information events
+        end
+        alt step completed or short-circuited
+            Workflow-->>Engine: StepResult
+            Engine->>Store: save_checkpoint(result)
+            opt context ledger enabled
+                Engine->>Ledger: link decisions to checkpoint
+            end
+            Engine->>Telemetry: step_complete
+        else approval needed
+            Workflow->>Gate: request_approval(payload)
+            Gate->>Store: insert pending queue row
+            Workflow-->>Engine: PauseForApproval
+            Engine->>Store: checkpoint pending result
+            Engine-->>Demo: paused state
+        end
+    end
 
-    B -.->|execution checkpoints,| B
-    B -.->|approvals, side effects| B
-    C -.->|step loop, pause/resume,| C
-    C -.->|crash recovery| C
-    E -.->|information lineage events| E
-    F -.->|structured run log| F
-    G -.->|knowledge trail| G
-
-    style B fill:#e8f4ff
-    style E fill:#fff4e8
-    style F fill:#f0f4e8
-    style G fill:#f0e8f4
+    Demo->>Gate: operator approves
+    Gate->>Store: update queue decision
+    Demo->>Engine: resume(workflow_id)
+    Engine->>Store: read decision and checkpoint approval
+    Engine->>Workflow: send_reply(...)
+    Workflow->>Store: persist mock side-effect result
+    Engine->>Store: checkpoint send and complete
+    Engine->>Telemetry: workflow_complete
 ```
 
-### Agent Readiness
+The arrows distinguish ownership: the workflow implements domain steps, the engine decides when progress is checkpointed, the approval gate records human decisions, and the store is the durable meeting point. The context ledger and telemetry describe the same execution from different perspectives; neither replaces workflow state.
 
-```mermaid
-flowchart TD
-    A[readiness_demo.py] --> B[FailureScenario injectors<br/>timeout, malformed JSON,<br/>prompt injection, etc.]
+### Proof outputs
 
-    A --> C[AgentRunner naked vs wrapped]
-    C --> D[WorkflowEngine<br/>one step per agent turn]
+| Track | Controlled input | Evidence surface | Decision |
+|-------|------------------|------------------|----------|
+| Agent Readiness | Six injected failure scenarios; naked vs wrapped runner | `readiness.json`, verdict-first report | Ship or do not ship |
+| Colony | Identical seeded instance-loss schedule; naive vs durable runner | Completion, cost, wall-clock, recovery table | Measured durability delta |
+| Eval Gate | Completed traces, golden cases, required scorers | Passed, failed, or incomplete report | Release or block |
+| Verification | Claimed capabilities and deferred checks | `golden.md`, `verification/` ledger | Proven, failed, or still only a claim |
 
-    A --> E[readiness.json]
-    A --> F[readiness_report.md<br/>verdict first]
-
-    style B fill:#ffe8e8
-    style E fill:#e8f4e8
-    style F fill:#e8f4ff
-```
-
-### Colony Benchmark
-
-```mermaid
-flowchart TD
-    A[chaos_benchmark_demo.py] --> B[benchmark.py<br/>naive vs colony]
-
-    A --> C[ColonyController]
-    C --> D[ColonyStore]
-
-    C --> E[ChaosSchedule<br/>seeded instance kills]
-
-    A --> F[terminal comparison table<br/>completion delta]
-
-    style E fill:#ffe8e8
-    style F fill:#e8f4ff
-```
-
-### Eval Gate and Verification
-
-```mermaid
-flowchart TD
-    A[completed workflow traces<br/>golden cases] --> B[evals.cases<br/>normalize redacted cases<br/>and trace metadata]
-
-    A --> C[evals.scorers<br/>required and optional<br/>scorer results]
-
-    B --> D[evals.gate<br/>passed / failed<br/>/ incomplete verdict]
-
-    A --> E[golden.md<br/>domain scenarios and<br/>expected anchors]
-
-    A --> F[verification/<br/>deferred or independently<br/>checked evidence]
-
-    D --> G{Ship decision}
-    G -->|passed| H[Release]
-    G -->|failed/incomplete| I[Do not ship]
-
-    style D fill:#e8f4ff
-    style G fill:#fff4e8
-    style H fill:#e8f4e8
-    style I fill:#ffe8e8
-```
-
-This is the repo's proof loop: workflows create durable traces, extensions render human-facing evidence, and eval/verification artifacts decide whether a change is safe to ship or still only a claim.
+This is the proof loop: workflows create durable traces, extensions turn them into comparable evidence, and eval or verification artifacts support a decision.
 
 ---
 
@@ -433,7 +505,11 @@ flowchart LR
 
 ---
 
-## Repository Index: All Spec Files
+## Reference Appendix
+
+Everything in this appendix is exhaustive lookup material. A newcomer can skip it on the first pass; contributors should use it to find the public entry point and implementation contract for an area.
+
+### Repository Index: All Spec Files
 
 Every `*-spec.md` in the repository (9 files). Specs are private implementation contracts with acceptance criteria; public proof is code, tests, demos, and READMEs.
 
@@ -453,7 +529,7 @@ Every `*-spec.md` in the repository (9 files). Specs are private implementation 
 
 ---
 
-## Repository Index: All README Files
+### Repository Index: All README Files
 
 Every `README.md` in the repository (7 files). READMEs are operator and reviewer entry points; specs hold implementation detail.
 
@@ -471,141 +547,28 @@ Every `README.md` in the repository (7 files). READMEs are operator and reviewer
 
 ---
 
-## Spec ↔ README Cross-Reference
+## Where to Go Next
 
-Quick lookup: which entry point and spec belong to each area.
+Use [learning-path.md](learning-path.md) when orientation is no longer enough. It sequences demos, source files, exercises, and specs in dependency order, with a verification gate at each stage.
 
-| Area | README | Spec(s) | Companion docs |
-|------|--------|---------|----------------|
-| Core | [README.md](../README.md) | [dflow-spec.md](dflow-spec.md) | [dflow-arch.md](dflow-arch.md), [exercises.md](exercises.md) |
-| Colony | [colony/README.md](../colony/README.md) | [colony-spec.md](../colony/colony-spec.md) | [colony-methodology.md](colony-methodology.md) |
-| Readiness | [readiness/README.md](../readiness/README.md) | [dflow-readiness-spec.md](../readiness/docs/dflow-readiness-spec.md) | [field-pattern.md](field-pattern.md) |
-| Context | [context/README.md](../context/README.md) | [context-spec.md](../context/context-spec.md), [context-measurement-spec.md](../context/context-measurement-spec.md) | [context-extension.md](context-extension.md) |
-| Eval Gate | — | [eval-gate-spec.md](eval-gate-spec.md) | `evals/` package, [golden.md](../golden.md) |
-| Target Planner | — | [planner-spec.md](../planner/planner-spec.md) | — |
-| DataFlow | — | [dataflow-spec.md](../dataflow-spec.md) | — |
-| Factory / CLEAR | [factory/README.md](../factory/README.md) | [clear-spec.md](../factory/clear-spec.md) | [factory/CLEAR.md](../factory/CLEAR.md) |
-| AWS infra | [infra/README.md](../infra/README.md) | — | [aws-deployment-proposal.md](aws-deployment-proposal.md) |
-| LangSmith export | — | — | [langsmith-adapter.md](langsmith-adapter.md) |
-| Portfolio / PM view | [README.md](../README.md) | *(all specs)* | [durable-flow-overview.md](../durable-flow-overview.md) |
+| Part | Stages | Covers |
+|------|--------|--------|
+| I — Core spine | 0–5 (~3.5 h) | Checkpoint → approval gate → crash window → full workflow → **extend the engine** |
+| II — Extensions | 6–9 (~3.5 h) | Agent turns as steps → information lineage → loops in extension state → ship gates |
+| III — Optional | Tracks A–C | Colony benchmark, AWS topology, draft specs |
 
----
+The extension subsections are listed flat but are not equally load-bearing. If you have no specific goal, read **Context → Agent Readiness → Factory/CLEAR**: each exercises a different primitive, ending with the hardest lesson that loops belong in extension state. Colony is implemented but independent. Planner and DataFlow are draft specifications, not shipped features.
 
-## Other Notable Documentation
-
-Supporting docs that are neither `-spec.md` nor `README.md`:
-
-| Document | Path | Role |
-|----------|------|------|
-| Architecture diagrams | [dflow-arch.md](dflow-arch.md) | Runtime invariants, Mermaid diagrams |
-| Hands-on exercises | [exercises.md](exercises.md) | Guided tasks for SQLite, fallback, idempotency |
-| Durable Agent Pattern | [field-pattern.md](field-pattern.md) | Field checklist for readiness / deployment |
-| Context extension guide | [context-extension.md](context-extension.md) | Schema, audit contract, privacy boundary |
-| Colony methodology | [colony-methodology.md](colony-methodology.md) | Benchmark protocol and threats to validity |
-| LangSmith adapter | [langsmith-adapter.md](langsmith-adapter.md) | Optional telemetry and context export |
-| Product scope summary | [durable-flow-overview.md](../durable-flow-overview.md) | Consolidated portfolio for reviewers |
-| Competitive Space Map | [competitive-differentiation-and-space-map.md](../competitive-differentiation-and-space-map.md) | Strategic positioning vs Temporal, LangGraph, and BPM engines |
-| Contributing | [CONTRIBUTING.md](../CONTRIBUTING.md) | Contribution guidelines |
-| Changelog | [CHANGELOG.md](../CHANGELOG.md) | Release history |
-
----
-
-## Suggested Reading Order
-
-**1. Run something (15 minutes)**
-
-```bash
-./start.sh crash      # core durability
-./start.sh inbox      # approval + side effects
-./start.sh context    # information lineage
-./start.sh readiness  # deployability delta
-```
-
-**2. Understand the shell (30 minutes)**
-
-- Read [dflow-arch.md](dflow-arch.md) — state machine, checkpoint index semantics, idempotency
-- Skim `src/engine.py` and `src/store.py` — the two files everything else assumes
-
-**3. Pick one extension aligned with your question (30–60 minutes)**
-
-| If you care about… | Start here |
-|--------------------|------------|
-| Compute / spot instances | [colony/README.md](../colony/README.md) |
-| Shipping agents safely | [readiness/README.md](../readiness/README.md) + [field-pattern.md](field-pattern.md) |
-| Auditing what the model saw | [context/README.md](../context/README.md) |
-| Regression gates | [eval-gate-spec.md](eval-gate-spec.md) + `evals/` |
-| Long-running spec-driven agents | [factory/README.md](../factory/README.md) |
-| Production topology | [infra/README.md](../infra/README.md) |
-
-**4. Implement or extend**
+**Implement or extend**
 
 - Core changes → [dflow-spec.md](dflow-spec.md) + tests in `tests/`
 - New extension → follow additive SQLite tables, optional dependencies, verdict-first reports; see [dflow-arch.md § Extension Pattern](dflow-arch.md)
 
 ---
 
-## Implementation Conventions Worth Knowing
-
-**Import path.** The Python package lives under `src/`. Examples add repo root to `PYTHONPATH` (`start.sh`, `pyproject.toml` pytest config). Imports look like `from src.engine import WorkflowEngine`.
-
-**Zero required dependencies.** Core is stdlib-only. Optional groups: `providers`, `mcp`, `adk`, `langsmith`, `dev`.
-
-**Determinism over realism.** Mock model providers, approximate token counts (words / 0.75), TF-IDF without embeddings — deliberate so behavior is testable in one sitting.
-
-**Verdict-first surfaces.** Readiness reports, Colony benchmarks, context audits, eval gates, and (planned) planner traces lead with the decision, then evidence.
-
-**Explicit non-claims.** Draft specs (Planner, DataFlow) and preview integrations must not be read as shipped features. ADK path verifies adapter boundary, not full Google Runner E2E. Colony mock results are labeled; live path is gated.
-
-**Production replacements (intentional).** Temporal for orchestration, LangGraph for agent graphs, LiteLLM/Portkey for routing, LangSmith for observability — DurableFlow is the inspectable reference, not the replacement ([README § Why not X?](../README.md)).
-
----
-
 ## Mental Model Summary
 
-### Repository structure
-
-```mermaid
-flowchart TD
-    Root[durableflow/]
-
-    Root --> src[src/<br/>durable runtime]
-    Root --> agent[agent/<br/>agent runner]
-    Root --> context[context/<br/>info lineage]
-    Root --> colony[colony/<br/>compute benchmark]
-    Root --> readiness[readiness/<br/>deployability]
-    Root --> evals[evals/<br/>regression gates]
-    Root --> factory[factory/<br/>CLEAR example]
-    Root --> planner[planner/<br/>routing spec]
-    Root --> infra[infra/<br/>AWS sketch]
-    Root --> integrations[integrations/<br/>LangSmith export]
-    Root --> examples[examples/<br/>demos]
-    Root --> tests[tests/<br/>unit tests]
-    Root --> verification[verification/<br/>deferred claims]
-    Root --> docs[docs/<br/>specs + this file]
-
-    src --> engine[engine.py<br/>WorkflowEngine]
-    src --> store[store.py<br/>WorkflowStore]
-    src --> approval[approval.py<br/>ApprovalGate]
-    src --> router[model_router.py<br/>fallback + cost]
-    src --> selector[context_selector.py<br/>TF-IDF budget]
-    src --> telemetry[telemetry.py<br/>JSONL logging]
-    src --> workflows[workflows.py<br/>InboxTriageWorkflow]
-
-    style src fill:#e8f4ff
-    style agent fill:#fff4e8
-    style context fill:#fff4e8
-    style colony fill:#fff4e8
-    style readiness fill:#fff4e8
-    style evals fill:#f0e8f4
-    style factory fill:#f0e8f4
-    style planner fill:#f5f5f5
-    style infra fill:#f5f5f5
-    style examples fill:#e8f4e8
-    style tests fill:#e8f4e8
-    style docs fill:#f0f4e8
-```
-
-### Layer summary
+### Package summary
 
 | Layer | One-line purpose |
 |-------|------------------|

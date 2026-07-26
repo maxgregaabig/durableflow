@@ -1,0 +1,57 @@
+%% Agentic loop: reason-act-observe bridged into WorkflowEngine
+%% Source of truth for docs/agent-loop.md — paste into Mermaid Live Editor to edit.
+
+flowchart TD
+    subgraph register ["Registration (AgentRunner.register)"]
+        R1["Register agent_turn_0 … agent_turn_{max_turns-1}"]
+        R2["Each turn = one WorkflowEngine step"]
+        R1 --> R2
+    end
+
+    subgraph turn ["One turn (agent_turn_N)"]
+        T0{"Last history entry<br/>is_terminal?"}
+        T0 -->|yes| T_SKIP["Skip turn<br/>(already finished)"]
+        T0 -->|no| T1["Build prompt from<br/>history + context"]
+        T1 --> T2{"Tokens &gt; budget?"}
+        T2 -->|yes| T3["ContextSelector trims prompt"]
+        T2 -->|no| T4["ModelRouter.route()"]
+        T3 --> T4
+        T4 --> T5["REASON: AgentStep.step()<br/>→ AgentTurn"]
+        T5 --> T6{"is_terminal?"}
+        T6 -->|yes| T7["OBSERVE: append turn<br/>checkpoint StepResult"]
+        T6 -->|no| T8{"tool known?"}
+        T8 -->|no| T9["OBSERVE: unknown_tool error<br/>checkpoint"]
+        T8 -->|yes| T10{"tool.is_write?"}
+        T10 -->|no| T11["ACT: execute read tool<br/>(timeout + JSON guard)"]
+        T11 --> T12["OBSERVE: append observation<br/>checkpoint StepResult"]
+        T10 -->|yes| T13["ACT: request_approval()<br/>PauseForApproval"]
+    end
+
+    subgraph resume ["Resume after approval"]
+        A1["Operator approve / reject"]
+        A2["commit handler on resume"]
+        A3["Idempotency key → side_effect_log"]
+        A4["Execute write once"]
+        A5["OBSERVE: append approved turn<br/>checkpoint StepResult"]
+        A1 --> A2 --> A3 --> A4 --> A5
+    end
+
+    subgraph persist ["Durable state"]
+        P1[("step_data.agent_history")]
+        P2[("step_results per turn")]
+        P3[("approval_queue")]
+        P4[("side_effect_log")]
+    end
+
+    R2 --> T0
+    T13 --> P3
+    T13 -.->|engine resume| A1
+    T7 --> P1
+    T9 --> P1
+    T12 --> P1
+    A5 --> P1
+    T7 --> P2
+    T9 --> P2
+    T12 --> P2
+    A5 --> P2
+    A4 --> P4
