@@ -123,7 +123,20 @@ ingest_email → select_context → triage_llm → draft_reply → approval_gate
 - Informational emails still pass through all six linear steps, but the draft, approval, and send steps return checkpointed `skipped` results instead of doing their normal work
 - When a `ContextLedger` is injected via dependencies, steps record observed/retrieved/selected/rejected/consumed events and explicit decision lineage (Context extension)
 
-**Naming note:** `ContextSelector` currently serializes `retrieval_method="bm25"`, but `_score_relevance()` implements the simpler term-frequency × smoothed-IDF calculation described above. Treat `bm25` as a metadata-label mismatch, not as the implemented algorithm.
+**Retrieval method label vs algorithm (`bm25` mismatch):**
+
+`SelectionResult.retrieval_method` defaults to and is serialized as `"bm25"` (see `src/context_selector.py`, and assembly-lineage metadata on `retrieved` events in `src/workflows.py`). That string is a **metadata label only**. It is not a claim that Okapi BM25 is implemented.
+
+What `_score_relevance()` actually does, for each document and each query term present in the document:
+
+1. **Term frequency in the query** — `query_tf` from a bag-of-words count on the query.  
+2. **Term frequency in the document** — raw count of that term in the item content (no BM25-style saturation such as `tf / (tf + k1 · (1 − b + b · |d|/avgdl))`).  
+3. **Smoothed IDF** — `log((N + 1) / (df + 1)) + 1` over the in-memory corpus, then  
+4. **Accumulate** `query_tf * doc_tf * idf` and sort by score (timestamp as tie-break).
+
+That is a simple **TF × smoothed-IDF** product (the same family the rest of the docs call “TF-IDF-like”), followed by greedy token-budget packing in `_pack_budget`. Classic BM25 also length-normalizes documents and saturates term frequency; this selector does neither.
+
+**How to read lineage and audits:** if a context audit or `retrieved` event shows `retrieval_method: bm25`, treat it as a **label mismatch / historical name**, not as evidence of BM25 ranking. For claims and measurements, describe the baseline as TF × smoothed-IDF (or “TF-IDF-like”) unless the code and the label are fixed together. A future change should either implement real BM25 and keep the label, or rename the label (e.g. `tf_idf`) to match the implementation — both at once, so lineage stays honest.
 
 **Entry points:**
 
@@ -265,7 +278,7 @@ Extensions are **sibling packages** that share the core ethos (local-first, dete
 
 - **`agent/runner.py`** — `AgentRunner` registers each agent turn as a `WorkflowEngine` step; checkpoints every turn; intercepts write tools through approval; enforces token/turn budgets
 - **`agent/mini_react.py`** — minimal ReAct agent for deterministic fixtures
-- **`readiness/harness.py`** — injects failures (timeout, malformed JSON, prompt injection, context overflow, fallback, crash-after-write)
+- **`readiness/harness.py`** — injects failures (timeout, malformed JSON, prompt injection, context overflow, fallback, crash-after-write). Its injection case pauses a proposed write for review; it does not claim to solve provenance under injection.
 - **`readiness/scoring.py`** + **`view.py`** + **`render.py`** — Safety, Reliability, Cost, Observability scores → verdict-first report
 - **`mcp_server/legacy_crm.py`** + **`agent/mcp_client.py`** — gated writes over MCP (official protocol when installed, stdio JSON fallback)
 - **`agent/adk_adapter.py`** — adapter boundary for Google ADK; does not claim full Runner E2E

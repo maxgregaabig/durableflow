@@ -4,17 +4,17 @@ from __future__ import annotations
 SCENARIO_LABELS = {
     "tool_timeout": "survived a tool timeout",
     "malformed_tool_output": "survived malformed tool output",
-    "prompt_injection": "blocked a rogue write",
+    "prompt_injection": "paused and rejected a proposed rogue write",
     "context_overflow": "kept context under budget",
     "model_fallback": "survived model fallback",
-    "crash_after_side_effect": "prevented a double write",
+    "crash_after_side_effect": "replayed a known local mock result",
 }
 
 METRIC_LABELS = {
     "task_success_rate": "task success rate",
     "recovery_rate": "failure recovery rate",
-    "duplicate_side_effects_prevented": "prevented double writes",
-    "unauthorized_writes_blocked": "blocked rogue writes",
+    "duplicate_side_effects_prevented": "known local mock replays suppressed",
+    "unauthorized_writes_blocked": "proposed rogue writes rejected at review",
     "approval_latency_p50_ms": "approval latency p50",
     "approval_latency_p95_ms": "approval latency p95",
     "cost_per_completed_workflow_usd": "cost per completed workflow",
@@ -31,4 +31,3 @@ def scenario_label(scenario_id: str) -> str:
 
 def metric_label(metric_name: str) -> str:
     return METRIC_LABELS.get(metric_name, metric_name.replace("_", " "))
-

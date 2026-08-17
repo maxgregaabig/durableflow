@@ -144,3 +144,39 @@ def test_timeout_fallback_telemetry_is_recorded(tmp_path: Path) -> None:
     ]
     assert fallback_events
     assert "timed out" in fallback_events[0]["metadata"]["error"]
+
+
+def test_consequential_pause_refuses_changed_registered_function(tmp_path: Path) -> None:
+    store = WorkflowStore(tmp_path / "stale-definition.sqlite")
+    approval = ApprovalGate(store)
+    calls: list[str] = []
+    state = store.create_workflow("test")
+    engine = WorkflowEngine(
+        store,
+        TelemetryLogger(echo=False),
+        {
+            "approval_gate": approval,
+            "consequential_approval_steps": {"consequential"},
+        },
+    )
+
+    def original(state, step_data, dependencies):
+        gate_id = approval.request_approval(state.workflow_id, "consequential", {"write": True})
+        return PauseForApproval(gate_id, "consequential", {"write": True})
+
+    def changed(state, step_data, dependencies):
+        calls.append("changed")
+        return StepResult("consequential", {"executed": True}, 0.0)
+
+    from src.engine import PauseForApproval
+
+    engine.register_step("consequential", original)
+    paused = engine.execute(state.workflow_id)
+    assert paused.status == WorkflowStatus.PAUSED_APPROVAL
+    assert approval.list_pending()[0].definition_hash is not None
+    approval.approve(approval.list_pending()[0].gate_id)
+    engine.replace_step("consequential", changed)
+
+    resumed = engine.resume(state.workflow_id)
+    assert resumed.status == WorkflowStatus.STALE_DEFINITION
+    assert calls == []

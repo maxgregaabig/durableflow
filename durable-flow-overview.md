@@ -59,7 +59,7 @@ DurableFlow core covers:
 - **Crash recovery:** demos use real process termination to show restart and resume behavior.
 - **Approval gates:** unsafe or user-facing actions pause until an operator approves or rejects them.
 - **Approval rejection behavior:** default rejection terminates the workflow; extension workflows can choose continue semantics where rejection becomes an observation for later steps.
-- **Idempotent side effects:** external actions are protected against duplicate execution after crash or retry.
+- **Local mock replay suppression:** a known mock result is returned on a repeated local key after crash or retry; this is not remote-effect reconciliation.
 - **Model routing and fallback:** a primary model path can fail over to a secondary path.
 - **Cost accounting:** model calls record token usage and estimated cost per workflow step.
 - **Context selection:** prior emails and calendar events are ranked and packed under a hard token budget.
@@ -204,7 +204,7 @@ The proof surface is the before/after readiness report:
 - headline metrics capped so the report does not become a metrics dump
 - full detail available below the decision summary
 
-The strongest demo is the prompt-injection scenario: the naked agent executes an unsafe write, while the wrapped agent gates or blocks it.
+The strongest demo is the prompt-injection scenario: the naked agent executes an unsafe write, while the wrapped agent pauses the proposed write for review. This is not a claim that the pause solves provenance under injection; a deceived approver can still bind the attacker's act.
 
 ### 5.5 Scope Boundaries
 
@@ -438,7 +438,7 @@ This preview fits the production recommendation to use LangSmith for observation
 
 ### 9.1 Backend Engineer Learning the Core
 
-The engineer runs the crash recovery demo, inspects how a workflow resumes, sees approval pause/resume behavior, and verifies that side effects are not duplicated. The outcome is understanding the operational primitives beneath an assistant workflow.
+The engineer runs the crash recovery demo, inspects how a workflow resumes, sees approval pause/resume behavior, and verifies that a known mock result is replay-suppressed. The outcome is understanding the operational primitives beneath an assistant workflow, not proof of a remote-effect guarantee.
 
 ### 9.2 Infrastructure Evaluator Reviewing Colony
 

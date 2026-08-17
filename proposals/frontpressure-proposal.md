@@ -10,6 +10,7 @@
 **Depends on:** DurableFlow core SQLite persistence, `WorkflowStore`, `ApprovalGate`, `PauseForApproval`, `TelemetryLogger`, and the existing inbox triage `approval_gate` step.
 **Dependency policy:** Core implementation remains Python standard library only. Portable protocol artifacts under `frontpressure/spec/` MUST remain importable without DurableFlow core types. Optional presentation-protocol adapters (AG-UI, A2A export) live behind optional extras and lazy imports. Optional development dependency remains `pytest==8.4.2`.
 **Visibility:** Private implementation guide. Public artifacts are the repo: portable spec files, reference implementation, tests, conformance vectors, examples, and inbox audit traces.
+**Delta constraint (D6):** This proposal must reduce and consolidate interventions, not industrialize approval throughput; attention does not survive volume.
 
 ---
 

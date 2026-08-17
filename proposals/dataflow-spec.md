@@ -10,6 +10,7 @@
 **Dependency policy:** Core implementation remains Python standard library only. Optional runtime dependency: `pydantic>=2.0` for enhanced validation. Optional development dependency: `pytest==8.4.2`.
 **Visibility:** Private implementation guide. Public artifacts are repo docs, examples, tests, and audit traces.
 **Package:** `dataflow`
+**Delta constraint:** DataFlow is descriptive lineage only and must not become a second control plane or consistency model.
 
 ---
 

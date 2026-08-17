@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import time
+import hashlib
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Callable, Protocol, runtime_checkable
@@ -81,19 +82,20 @@ class WorkflowEngine:
 
     def execute(self, workflow_id: str) -> WorkflowState:
         state = self.store.load_workflow(workflow_id)
-        if state.status == WorkflowStatus.COMPLETED:
+        if state.status in {WorkflowStatus.COMPLETED, WorkflowStatus.REJECTED, WorkflowStatus.STALE_DEFINITION}:
             return state
         self.store.update_status(workflow_id, WorkflowStatus.RUNNING)
         return self._run_from_step(workflow_id, state.current_step + 1)
 
     def resume(self, workflow_id: str) -> WorkflowState:
+        """Resume against current registered functions; no general definition pin exists, while configured consequential pauses refuse a changed function identity (D4)."""
         state = self.store.load_workflow(workflow_id)
-        if state.status == WorkflowStatus.COMPLETED:
-            return state
-        if state.status == WorkflowStatus.REJECTED:
+        if state.status in {WorkflowStatus.COMPLETED, WorkflowStatus.REJECTED, WorkflowStatus.STALE_DEFINITION}:
             return state
         next_index = state.current_step + 1
         if state.status in {WorkflowStatus.PAUSED_APPROVAL, WorkflowStatus.APPROVED}:
+            if state.status == WorkflowStatus.PAUSED_APPROVAL and self._definition_is_stale(state):
+                return self.store.update_status(workflow_id, WorkflowStatus.STALE_DEFINITION)
             next_index = self._resume_index_after_approval(state)
             state = self.store.load_workflow(workflow_id)
             if state.status == WorkflowStatus.REJECTED:
@@ -220,6 +222,10 @@ class WorkflowEngine:
                     duration_ms=(time.perf_counter() - started) * 1000,
                 )
                 self.store.save_checkpoint(workflow_id, index, pending_result)
+                if name in self._consequential_approval_steps():
+                    self.store.record_approval_definition_hash(
+                        result.gate_id, self._function_identity_hash(fn)
+                    )
                 self.store.update_status(workflow_id, WorkflowStatus.PAUSED_APPROVAL)
                 self.telemetry.log_approval_request(workflow_id, name, result.gate_id)
                 return self.store.load_workflow(workflow_id)
@@ -249,6 +255,30 @@ class WorkflowEngine:
         self._run_context_export_final(workflow_id)
         self.telemetry.log_workflow_complete(workflow_id)
         return self.store.load_workflow(workflow_id)
+
+    def _consequential_approval_steps(self) -> set[str]:
+        configured = self.dependencies.get("consequential_approval_steps", set())
+        return set(configured) if isinstance(configured, (set, frozenset, list, tuple)) else set()
+
+    def _definition_is_stale(self, state: WorkflowState) -> bool:
+        if state.current_step < 0 or state.current_step >= len(self._steps):
+            return False
+        step_name, fn = self._steps[state.current_step]
+        if step_name not in self._consequential_approval_steps():
+            return False
+        approval = self.dependencies.get("approval_gate")
+        if approval is None:
+            return False
+        request = approval.get_for_workflow(state.workflow_id, step_name)
+        if request is None or not request.definition_hash:
+            return False
+        return request.definition_hash != self._function_identity_hash(fn)
+
+    @staticmethod
+    def _function_identity_hash(fn: StepFunction) -> str:
+        """The deliberately small WS0 D4 guard: module + qualified function name."""
+        identity = f"{fn.__module__}:{fn.__qualname__}"
+        return hashlib.sha256(identity.encode("utf-8")).hexdigest()
 
     def _run_context_export_final(self, workflow_id: str) -> None:
         """Final best-effort context export at completion (spec §10.3)."""

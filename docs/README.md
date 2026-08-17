@@ -19,6 +19,6 @@ Start here after running `./start.sh crash` from the repo root.
 | [eval-gate-spec.md](eval-gate-spec.md) | Implementers | Traces -> eval cases -> scorers -> ship gate |
 | [langsmith-adapter.md](langsmith-adapter.md) | Platform teams | Optional telemetry and context lineage export |
 | [opentelemetry-adapter-proposal.md](opentelemetry-adapter-proposal.md) | Platform teams | Proposal: OTel span export (not implemented) |
-| [aws-deployment-proposal.md](aws-deployment-proposal.md) | Infrastructure | Proposal: AWS deployment topology |
+| [aws-deployment-proposal.md](../proposals/aws-deployment-proposal.md) | Infrastructure | Proposal: AWS deployment topology |
 
 **Suggested path:** follow [learning-path.md](learning-path.md) — it sequences the demos, source files, exercises, and specs below in dependency order. Use [walkthrough.md](walkthrough.md) as the lookup index rather than linear reading. For extension work, start with the extension README, then the linked spec or methodology.

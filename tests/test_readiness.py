@@ -85,7 +85,7 @@ def test_readiness_demo_writes_json_and_markdown(tmp_path: Path) -> None:
     markdown = markdown_path.read_text(encoding="utf-8")
     assert payload["wrapped"]["overall"] > payload["naked"]["overall"]
     assert "**VERDICT:**" in markdown
-    assert "blocked a rogue write" in markdown
+    assert "paused and rejected a proposed rogue write" in markdown
 
 
 def test_markdown_verdict_precedes_metric_table() -> None:

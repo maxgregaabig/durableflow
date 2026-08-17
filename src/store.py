@@ -27,6 +27,7 @@ class WorkflowStatus(StrEnum):
     COMPLETED = "completed"
     FAILED = "failed"
     CRASHED = "crashed"
+    STALE_DEFINITION = "stale_definition"
 
 
 @dataclass(frozen=True)
@@ -117,6 +118,7 @@ class WorkflowStore:
                     decided_at      TEXT,
                     decided_by      TEXT,
                     rejection_reason TEXT,
+                    definition_hash TEXT,
                     FOREIGN KEY (workflow_id) REFERENCES workflows(workflow_id)
                 );
 
@@ -134,6 +136,14 @@ class WorkflowStore:
                 CREATE INDEX IF NOT EXISTS idx_step_results_workflow ON step_results(workflow_id);
                 """
             )
+            # Existing DurableFlow databases predate the narrow D4 guard.
+            # This is deliberately only a function-identity equality value;
+            # it is not an authorization or policy field.
+            try:
+                conn.execute("ALTER TABLE approval_queue ADD COLUMN definition_hash TEXT")
+            except Exception as exc:
+                if "duplicate column" not in str(exc).lower():
+                    raise
 
     def create_workflow(
         self,
@@ -287,6 +297,7 @@ class WorkflowStore:
         step_name: str,
         result: dict[str, Any],
     ) -> None:
+        """Local mock-replay suppression, not effect reconciliation: it has no remote reference, ``unknown`` state, or reconciliation deadline."""
         with self.connect() as conn:
             conn.execute(
                 """
@@ -320,6 +331,14 @@ class WorkflowStore:
         with self.connect() as conn:
             row = conn.execute(query, params).fetchone()
         return int(row["count"])
+
+    def record_approval_definition_hash(self, gate_id: str, definition_hash: str) -> None:
+        """Attach the sanctioned narrow D4 identity guard to a pending local gate."""
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE approval_queue SET definition_hash = ? WHERE gate_id = ?",
+                (definition_hash, gate_id),
+            )
 
     def _row_to_state(self, row: Any) -> WorkflowState:
         return WorkflowState(
@@ -455,6 +474,7 @@ class PostgresWorkflowStore(WorkflowStore):
                     decided_at      TEXT,
                     decided_by      TEXT,
                     rejection_reason TEXT,
+                    definition_hash TEXT,
                     FOREIGN KEY (workflow_id) REFERENCES workflows(workflow_id)
                 );
 
@@ -470,5 +490,6 @@ class PostgresWorkflowStore(WorkflowStore):
                 CREATE INDEX IF NOT EXISTS idx_workflows_status ON workflows(status);
                 CREATE INDEX IF NOT EXISTS idx_approval_status ON approval_queue(status);
                 CREATE INDEX IF NOT EXISTS idx_step_results_workflow ON step_results(workflow_id);
+                ALTER TABLE approval_queue ADD COLUMN IF NOT EXISTS definition_hash TEXT;
                 """
             )

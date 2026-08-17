@@ -143,6 +143,7 @@ class AgentRunner:
             steps.append(WorkflowStep(name, self._make_turn_step(index, name)))
             engine.dependencies["approval_rejection_policies"][name] = ApprovalRejectionPolicy.CONTINUE
             engine.dependencies["approval_commit_handlers"][name] = self._make_commit_handler(index, name)
+            engine.dependencies.setdefault("consequential_approval_steps", set()).add(name)
         engine.register_steps(steps)
 
     def _make_turn_step(self, turn_index: int, step_name: str):

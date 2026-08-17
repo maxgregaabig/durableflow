@@ -333,7 +333,7 @@ The 82-line agent is the point: the intelligence is trivial, the durable shell a
 
 ### Predict, then verify
 
-The strongest demo is prompt injection. **Predict** what the naked agent does versus the wrapped agent when a tool observation contains an injected instruction to perform an unsafe write. Then find both outcomes in `readiness.json` and locate the line in `runner.py` that produces the difference.
+The strongest demo is prompt injection. **Predict** what the naked agent does versus the wrapped agent when a tool observation contains an injected instruction to perform an unsafe write. The wrapped case pauses the proposed write for review; it does not prove provenance under injection, since a deceived approver could still bind the attacker's act. Then find both outcomes in `readiness.json` and locate the line in `runner.py` that produces the difference.
 
 ### Gate
 
@@ -472,7 +472,7 @@ Read [infra/README.md](../infra/README.md), [infra/durableflow_stack.py](../infr
 
 - [planner/planner-spec.md](../planner/planner-spec.md) — budgeted local-first routing
 - [dataflow-spec.md](../dataflow-spec.md) — typed data DAG lineage
-- [opentelemetry-adapter-proposal.md](opentelemetry-adapter-proposal.md), [aws-deployment-proposal.md](aws-deployment-proposal.md)
+- [opentelemetry-adapter-proposal.md](opentelemetry-adapter-proposal.md), [aws-deployment-proposal.md](../proposals/aws-deployment-proposal.md)
 
 **Gate:** for each, you can say what would have to be built and which existing tests would need to change. That is the difference between a spec you've read and a spec you could execute.
 

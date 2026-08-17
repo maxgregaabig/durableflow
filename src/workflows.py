@@ -44,6 +44,9 @@ class InboxTriageWorkflow:
             "policy": self.policy,
             "data_dir": self.data_dir,
             "context_ledger": self.context_ledger,
+            # ``approval_gate`` is the local pause protecting the mock
+            # ``send_reply`` demonstration until the Aegis gateway exists.
+            "consequential_approval_steps": {"approval_gate"},
         }
 
     def register(self, engine: WorkflowEngine) -> None:

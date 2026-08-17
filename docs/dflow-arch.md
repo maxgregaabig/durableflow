@@ -4,6 +4,20 @@ Visual architecture for **Durable Flow**: Python stdlib, SQLite persistence, moc
 
 **Related docs:** [README](../README.md) (quick start) · [dflow-spec.md](dflow-spec.md) (requirements and acceptance criteria) · [field-pattern.md](field-pattern.md) (deployment pattern)
 
+## Mechanisms, Preconditions, and Residuals
+
+This is the discriminating view of the reference runtime. It describes what
+the mechanisms demonstrate today; it does not treat a layer diagram as proof
+of an action/effect boundary. The table is sourced from the alignment
+[proposal §2.3](../proposals/delta-abep-aegis-alignment-proposal.md#23-the-opening-architecture-is-descriptive-not-discriminating).
+
+| Mechanism | Assumed precondition | What DurableFlow proves | Residual delta |
+|---|---|---|---|
+| Workflow checkpointing | Replayed activities are safe | Local steps resume from durable checkpoints | Consequential effects require a separate effect authority |
+| Human workflow gate | Approved state remains attached to the intended effect | Pause, persist, approve/reject, resume | Approval must bind exact action and mutable preconditions |
+| Idempotency key | Endpoint honors the key and exposes a stable operation identity | Mock result is locally replay-suppressed | Unknown remote outcomes require resolution and reconciliation |
+| Versioned workflow | Running work retains compatible semantics | Consequential local pauses refuse a changed registered function identity | Pin or refuse changed definitions for all in-flight work remains external scope |
+
 ## Stack Overview
 
 High-level view of where DurableFlow sits between agent reasoning and production deployment.

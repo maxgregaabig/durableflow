@@ -1,5 +1,7 @@
 # AWS Deployment Architecture for DurableFlow
 
+**Delta constraint:** Any production topology must deploy the Aegis/gateway action boundary for consequential effects, not create a second DurableFlow authority layer in AWS.
+
 This guide evaluates AWS deployment options for **DurableFlow** and outlines how to scale its core primitives—durable execution, approval gates, cost accounting, and context selection—to a production-grade AWS environment.
 
 ---

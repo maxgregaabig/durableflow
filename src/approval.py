@@ -19,9 +19,11 @@ class ApprovalRequest:
     decided_at: str | None
     decided_by: str | None
     rejection_reason: str | None
+    definition_hash: str | None
 
 
 class ApprovalGate:
+    """Durable workflow interruption, not an authorization boundary: it does not bind action identity, tenant, policy version, or mutable preconditions."""
     def __init__(self, store: WorkflowStore):
         self.store = store
 
@@ -118,5 +120,5 @@ class ApprovalGate:
             decided_at=row["decided_at"],
             decided_by=row["decided_by"],
             rejection_reason=row["rejection_reason"],
+            definition_hash=row["definition_hash"],
         )
-

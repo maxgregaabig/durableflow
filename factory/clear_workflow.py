@@ -407,6 +407,7 @@ class ClearWorkflow:
     # --- operator gate ---------------------------------------------------
 
     def _plan_approval(self, state, step_data, deps):
+        """Pause for review of local workspace artifacts, not a consequential external effect."""
         from src.approval import ApprovalGate
 
         approval: ApprovalGate = deps["approval_gate"]
@@ -831,12 +832,12 @@ class ClearWorkflow:
     # --- optional report approval (§2.1 item 7) -------------------------
 
     def _report_approval(self, state: "WorkflowState", step_data, deps):
-        """Optional operator gate between phase_runner and ship.
+        """Optional local-artifact review gate between phase_runner and ship.
 
         Only registered when ``require_report_approval`` is set. The build
         must already be verified (ship will enforce that independently);
-        this gate is purely a human release decision, distinct from
-        automated remediation.
+        this gate is purely a human review of local workspace artifacts,
+        distinct from automated remediation or external-effect authorization.
         """
         from src.approval import ApprovalGate
 

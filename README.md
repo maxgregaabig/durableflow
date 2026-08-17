@@ -116,7 +116,7 @@ These scores come from deterministic local fixtures. The point is the evaluation
 - model fallback
 - crash after side effect
 
-The report is intentionally verdict-first: "ship" or "do not ship," the durability delta, and the single unsafe behavior that blocks deployment. The demo writes `readiness.json` and `readiness_report.md`.
+The report is intentionally verdict-first: "ship" or "do not ship," the durability delta, and the single readiness-scoring behavior that blocks a recommendation. The demo writes `readiness.json` and `readiness_report.md`; it is not a platform-safety guarantee.
 
 The MCP path uses the official `mcp==1.13.1` client/server protocol when the optional package is installed, and falls back to a tiny stdio JSON protocol so the demo remains dependency-free. The ADK path is currently an adapter boundary: it verifies `google-adk==1.18.0` import, ADK `Agent` object construction, history conversion, and resume-safe behavior with an ADK-compatible mock. It does not yet claim real Google ADK Runner end-to-end execution.
 
@@ -159,7 +159,7 @@ The second problem is partial failure. Assistant workflows depend on model provi
 
 The third problem is cost control. Autonomous mode increases inference volume because the system starts making calls in the background. Cost accounting has to be per workflow and per step, not a monthly surprise. The model router computes cost from estimated input and output tokens using model-specific pricing and records the model used for each call.
 
-The fourth problem is human approval latency. Many useful assistant actions are not safe to execute automatically: sending email, rescheduling meetings, making commitments, or exposing sensitive context. The approval gate here persists a pending decision and pauses the workflow until an operator approves or rejects it. That is a small mechanism, but it changes the system from "agent loop" to "controlled execution."
+The fourth problem is human approval latency. Many useful assistant actions are not safe to execute automatically: sending email, rescheduling meetings, making commitments, or exposing sensitive context. The approval gate here persists a pending decision and pauses the workflow until an operator approves or rejects it. That is durable workflow interruption, not an authorization boundary or a defense against a deceived approver.
 
 The fifth problem is observability across non-deterministic paths. Model fallback, user rejection, crash recovery, and skipped side effects are all meaningful events. The telemetry logger writes JSON lines for steps, approvals, crashes, fallback, and workflow completion so the path can be audited after the run.
 
@@ -254,7 +254,7 @@ If you are deploying agentic workflows in production, you should use established
 
 ### DurableFlow vs. LangGraph / CrewAI
 * **What they do:** Powerful libraries and runtimes for agent orchestration, graph state, reasoning loops, persistence, and human-in-the-loop workflows.
-* **Why not LangGraph/CrewAI here:** DurableFlow is not trying to compete with those frameworks. It isolates a few operational primitives in plain Python so you can see exactly what is persisted, when a checkpoint is written, how an approval pause resumes, and how idempotency prevents duplicate side effects. It is a teaching fixture and test harness, not a better agent framework.
+* **Why not LangGraph/CrewAI here:** DurableFlow is not trying to compete with those frameworks. It isolates a few operational primitives in plain Python so you can see exactly what is persisted, when a checkpoint is written, how an approval pause resumes, and how a known mock result is locally replay-suppressed. It is a teaching fixture and test harness, not a better agent framework or a remote-effect authority.
 
 ### DurableFlow vs. LangSmith / Arize Phoenix
 * **What they do:** Tracing, logging, and evaluation datasets.

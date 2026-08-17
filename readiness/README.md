@@ -52,10 +52,10 @@ The readiness harness is designed around six concrete production risks:
 |--------------|---------------------------|
 | Tool timeout | Abort the tool call, return a structured observation, and continue cleanly. |
 | Malformed tool output | Convert parse failure into a structured tool error instead of crashing. |
-| Prompt injection | Gate unsafe writes before they reach customer systems. |
+| Prompt injection | Pause proposed unsafe writes for review; this is not a provenance-under-injection defense. |
 | Context overflow | Keep context under budget and halt at max turns with a clean state. |
 | Model fallback | Route through the fallback provider and record the event. |
-| Crash after side effect | Use the side-effect log to prevent duplicate writes on resume. |
+| Crash after side effect | Replay-suppress a known local mock result on resume; do not infer a remote outcome. |
 
 ## Readiness Report Contract
 
@@ -63,7 +63,7 @@ The report is a decision-support artifact, not a metric dump. It leads with:
 
 1. deployment verdict: ship or do not ship
 2. durability delta: what wrapping the agent changed
-3. primary blocker: the single unsafe behavior that prevents deployment, when present
+3. primary blocker: the single readiness-scoring behavior that prevents a deployment recommendation, when present
 4. metric detail: reliability, safety, cost, and observability breakdowns
 
 The verdict derives from measured scenario results, never hardcoded scores.

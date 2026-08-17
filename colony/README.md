@@ -58,6 +58,7 @@ The Colony runner checkpoints after each completed stage, marks lost work recove
 
 - [colony-spec.md](colony-spec.md) -- private implementation spec and acceptance criteria
 - [../docs/colony-methodology.md](../docs/colony-methodology.md) -- public methodology, assumptions, and threats to validity
+- [../proposals/vast-colony-proposal.md](../proposals/vast-colony-proposal.md) -- proposal for gated live Vast verification (G0–G2)
 - [benchmark.py](benchmark.py) -- naive-vs-Colony benchmark orchestrator
 - [controller.py](controller.py) -- durable controller, dispatch, recovery, and migration
 - [provider.py](provider.py) -- mock provider and gated Vast provider
