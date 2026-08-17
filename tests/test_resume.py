@@ -180,3 +180,29 @@ def test_consequential_pause_refuses_changed_registered_function(tmp_path: Path)
     resumed = engine.resume(state.workflow_id)
     assert resumed.status == WorkflowStatus.STALE_DEFINITION
     assert calls == []
+
+
+def test_waiting_external_action_does_not_advance(tmp_path: Path) -> None:
+    store = WorkflowStore(tmp_path / "waiting-external.sqlite")
+    calls: list[str] = []
+    state = store.create_workflow("test")
+    engine = WorkflowEngine(store, TelemetryLogger(echo=False))
+
+    def step(name: str):
+        def fn(state, step_data, dependencies):
+            calls.append(name)
+            return StepResult(name, {"ok": True}, 1.0)
+
+        return fn
+
+    engine.register_step("one", step("one"))
+    engine.register_step("two", step("two"))
+    store.save_checkpoint(state.workflow_id, 0, StepResult("one", {"ok": True}, 1.0))
+    store.update_status(state.workflow_id, WorkflowStatus.WAITING_EXTERNAL_ACTION)
+
+    assert engine.execute(state.workflow_id).status == WorkflowStatus.WAITING_EXTERNAL_ACTION
+    assert engine.resume(state.workflow_id).status == WorkflowStatus.WAITING_EXTERNAL_ACTION
+    assert calls == []
+    pending = store.list_pending()
+    assert [item.workflow_id for item in pending] == [state.workflow_id]
+    assert pending[0].status == WorkflowStatus.WAITING_EXTERNAL_ACTION

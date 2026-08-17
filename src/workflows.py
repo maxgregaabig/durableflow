@@ -8,7 +8,7 @@ from typing import Any
 
 from .approval import ApprovalGate
 from .context_selector import ContextItem, ContextSelector, SelectionResult, estimate_tokens
-from .engine import PauseForApproval, WorkflowEngine
+from .engine import PauseForApproval, WaitForExternalAction, WorkflowEngine
 from .model_router import ModelRouter, RoutingPolicy, default_policy
 from .store import StepResult, WorkflowState, WorkflowStore
 
@@ -26,6 +26,7 @@ class InboxTriageWorkflow:
         policy: RoutingPolicy | None = None,
         data_dir: Path = DATA_DIR,
         context_ledger: Any | None = None,
+        aegis_client: Any | None = None,
     ):
         self.store = store
         self.router = router or ModelRouter()
@@ -34,6 +35,7 @@ class InboxTriageWorkflow:
         self.policy = policy or default_policy()
         self.data_dir = data_dir
         self.context_ledger = context_ledger
+        self.aegis_client = aegis_client
 
     def dependencies(self) -> dict[str, Any]:
         return {
@@ -44,8 +46,8 @@ class InboxTriageWorkflow:
             "policy": self.policy,
             "data_dir": self.data_dir,
             "context_ledger": self.context_ledger,
-            # ``approval_gate`` is the local pause protecting the mock
-            # ``send_reply`` demonstration until the Aegis gateway exists.
+            "aegis_client": self.aegis_client,
+            # Only the mock teaching path has a local review pause.
             "consequential_approval_steps": {"approval_gate"},
         }
 
@@ -54,7 +56,8 @@ class InboxTriageWorkflow:
         engine.register_step("select_context", self.select_context)
         engine.register_step("triage_llm", self.triage_llm)
         engine.register_step("draft_reply", self.draft_reply)
-        engine.register_step("approval_gate", self.approval_step)
+        if self.aegis_client is None:
+            engine.register_step("approval_gate", self.approval_step)
         engine.register_step("send_reply", self.send_reply)
 
     def ingest_email(
@@ -62,7 +65,7 @@ class InboxTriageWorkflow:
         state: WorkflowState,
         step_data: dict[str, Any],
         dependencies: dict[str, Any],
-    ) -> StepResult:
+    ) -> StepResult | WaitForExternalAction:
         started = time.perf_counter()
         emails = _load_json(self.data_dir / "mock_emails.json")
         email_id = step_data.get("email_id")
@@ -368,6 +371,17 @@ class InboxTriageWorkflow:
             "subject": "Re: " + step_data["ingest_email"]["email"]["subject"],
             "body": step_data["draft_reply"].get("draft"),
         }
+        client = dependencies.get("aegis_client")
+        if client is not None:
+            envelope = {
+                "schema_version": "1.0", "canonicalization_version": "rfc8785-jcs-1",
+                "operation": "durableflow/send-reply", "target": payload["to"], "arguments": payload,
+                "preconditions": {}, "tenant_id": "derived-by-aegis", "requesting_principal": "derived-by-aegis",
+                "tool_binding": "durableflow/send-reply@1", "policy_ref": "durableflow-aegis@1",
+                "caller_request_key": f"{state.workflow_id}:send_reply", "caller_execution_ref": state.workflow_id,
+            }
+            return client.run_action(self.store, state, "send_reply", envelope)
+        # Mock-only local replay demonstration; never a production effect path.
         payload_hash = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
         idempotency_key = hashlib.sha256(
             f"{state.workflow_id}:send_reply:{payload_hash}".encode()

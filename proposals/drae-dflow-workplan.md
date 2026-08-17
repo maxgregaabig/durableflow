@@ -154,7 +154,7 @@ This workstream has no completion date; it is a gate every PR touching `src/` pa
 
 **Goal.** DurableFlow completes a consequential workflow only from a verified terminal result returned by the Aegis Gateway, including after injected failures — and it does so without the engine (`src/`) growing beyond WS1's guardrail.
 
-**Blocked on:** Aegis Workstream 2 (`grk-aegis-drae-proposal.md` §5, "Standalone Gateway") reaching its exit criterion — a foreign process can create and observe an action without Aegis internals or the write credential. DurableFlow has no HTTP endpoint to call before that. Do not start this workstream's code before that signal.
+**Blocked on:** Aegis Workstream 2 reached its HTTP exit in `aegis` (`cmd/gateway`, dispatch-to-terminal loop, `TestForeignClientReadsAVerifiedTerminalResult`). The WS3 harness is `cmd/verify-gateway-client`. DurableFlow may start this workstream. Do not route `send_reply` or the agent write loop through Aegis until a local run of that harness accepts a bundle produced after injected failure — otherwise a workflow sits in `WAITING_EXTERNAL_ACTION` with no verified terminal source.
 
 #### 5.2.1 Consequential-write inventory
 

@@ -18,7 +18,13 @@ class PauseForApproval:
     payload: dict[str, Any]
 
 
-StepFunction = Callable[[WorkflowState, dict[str, Any], dict[str, Any]], StepResult | PauseForApproval]
+@dataclass(frozen=True)
+class WaitForExternalAction:
+    """The step recorded its caller intent and must be re-run only to poll Aegis."""
+    step_name: str
+
+
+StepFunction = Callable[[WorkflowState, dict[str, Any], dict[str, Any]], StepResult | PauseForApproval | WaitForExternalAction]
 
 
 class ApprovalRejectionPolicy(StrEnum):
@@ -84,6 +90,8 @@ class WorkflowEngine:
         state = self.store.load_workflow(workflow_id)
         if state.status in {WorkflowStatus.COMPLETED, WorkflowStatus.REJECTED, WorkflowStatus.STALE_DEFINITION}:
             return state
+        if state.status == WorkflowStatus.WAITING_EXTERNAL_ACTION:
+            return state
         self.store.update_status(workflow_id, WorkflowStatus.RUNNING)
         return self._run_from_step(workflow_id, state.current_step + 1)
 
@@ -92,6 +100,13 @@ class WorkflowEngine:
         state = self.store.load_workflow(workflow_id)
         if state.status in {WorkflowStatus.COMPLETED, WorkflowStatus.REJECTED, WorkflowStatus.STALE_DEFINITION}:
             return state
+        if state.status == WorkflowStatus.WAITING_EXTERNAL_ACTION:
+            if state.current_step < 0 or state.current_step >= len(self._steps) or self.store.get_external_action_intent(state.workflow_id, self._steps[state.current_step][0]) is None:
+                return state
+            if self._definition_is_stale(state):
+                return self.store.update_status(workflow_id, WorkflowStatus.STALE_DEFINITION)
+            self.store.update_status(workflow_id, WorkflowStatus.RUNNING)
+            return self._run_from_step(workflow_id, state.current_step)
         next_index = state.current_step + 1
         if state.status in {WorkflowStatus.PAUSED_APPROVAL, WorkflowStatus.APPROVED}:
             if state.status == WorkflowStatus.PAUSED_APPROVAL and self._definition_is_stale(state):
@@ -208,7 +223,13 @@ class WorkflowEngine:
             try:
                 result = fn(state, state.step_data, self.dependencies)
             except Exception:
-                self.store.update_status(workflow_id, WorkflowStatus.FAILED)
+                # Once a consequential request intent exists, an HTTP/refusal
+                # failure must not let a later resume skip its step. Preserve
+                # the wait for explicit recovery or operator inspection.
+                if self.store.get_external_action_intent(workflow_id, name) is not None:
+                    self.store.update_status(workflow_id, WorkflowStatus.WAITING_EXTERNAL_ACTION)
+                else:
+                    self.store.update_status(workflow_id, WorkflowStatus.FAILED)
                 raise
 
             if isinstance(result, PauseForApproval):
@@ -228,6 +249,13 @@ class WorkflowEngine:
                     )
                 self.store.update_status(workflow_id, WorkflowStatus.PAUSED_APPROVAL)
                 self.telemetry.log_approval_request(workflow_id, name, result.gate_id)
+                return self.store.load_workflow(workflow_id)
+
+            if isinstance(result, WaitForExternalAction):
+                # The client has already atomically persisted its request intent
+                # and WAITING status before any HTTP attempt.
+                self.store.set_external_action_definition_hash(workflow_id, name, self._function_identity_hash(fn))
+                self.store.update_status(workflow_id, WorkflowStatus.WAITING_EXTERNAL_ACTION)
                 return self.store.load_workflow(workflow_id)
 
             duration_ms = result.duration_ms or (time.perf_counter() - started) * 1000
@@ -264,6 +292,9 @@ class WorkflowEngine:
         if state.current_step < 0 or state.current_step >= len(self._steps):
             return False
         step_name, fn = self._steps[state.current_step]
+        intent = self.store.get_external_action_intent(state.workflow_id, step_name)
+        if intent is not None:
+            return bool(intent.definition_hash and intent.definition_hash != self._function_identity_hash(fn))
         if step_name not in self._consequential_approval_steps():
             return False
         approval = self.dependencies.get("approval_gate")

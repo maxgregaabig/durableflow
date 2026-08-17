@@ -28,6 +28,7 @@ class WorkflowStatus(StrEnum):
     FAILED = "failed"
     CRASHED = "crashed"
     STALE_DEFINITION = "stale_definition"
+    WAITING_EXTERNAL_ACTION = "waiting_external_action"
 
 
 @dataclass(frozen=True)
@@ -53,6 +54,21 @@ class StepResult:
     def __post_init__(self) -> None:
         if not self.timestamp:
             object.__setattr__(self, "timestamp", utc_now())
+
+
+@dataclass(frozen=True)
+class ExternalActionIntent:
+    """Caller recovery state only; Aegis remains the receipt/effect authority."""
+    workflow_id: str
+    step_name: str
+    caller_request_key: str
+    action_fingerprint: str
+    canonical_envelope: str
+    canonicalization_version: str
+    definition_hash: str
+    action_id: str | None
+    status: str
+    created_at: str
 
 
 def utc_now() -> str:
@@ -128,6 +144,21 @@ class WorkflowStore:
                     step_name       TEXT NOT NULL,
                     result          TEXT NOT NULL,
                     executed_at     TEXT NOT NULL,
+                    FOREIGN KEY (workflow_id) REFERENCES workflows(workflow_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS external_action_intents (
+                    workflow_id TEXT NOT NULL,
+                    step_name TEXT NOT NULL,
+                    caller_request_key TEXT NOT NULL,
+                    action_fingerprint TEXT NOT NULL,
+                    canonical_envelope TEXT NOT NULL,
+                    canonicalization_version TEXT NOT NULL,
+                    definition_hash TEXT NOT NULL,
+                    action_id TEXT,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (workflow_id, step_name),
                     FOREIGN KEY (workflow_id) REFERENCES workflows(workflow_id)
                 );
 
@@ -231,7 +262,7 @@ class WorkflowStore:
             rows = conn.execute(
                 """
                 SELECT * FROM workflows
-                WHERE status IN (?, ?, ?, ?)
+                WHERE status IN (?, ?, ?, ?, ?)
                 ORDER BY updated_at ASC
                 """,
                 (
@@ -239,6 +270,7 @@ class WorkflowStore:
                     WorkflowStatus.RUNNING.value,
                     WorkflowStatus.PAUSED_APPROVAL.value,
                     WorkflowStatus.APPROVED.value,
+                    WorkflowStatus.WAITING_EXTERNAL_ACTION.value,
                 ),
             ).fetchall()
         return [self._row_to_state(row) for row in rows]
@@ -339,6 +371,39 @@ class WorkflowStore:
                 "UPDATE approval_queue SET definition_hash = ? WHERE gate_id = ?",
                 (definition_hash, gate_id),
             )
+
+    def record_external_action_intent(self, intent: ExternalActionIntent, step_index: int) -> ExternalActionIntent:
+        """Atomically durably record a request before its first HTTP attempt."""
+        with self.connect() as conn:
+            existing = conn.execute("SELECT * FROM external_action_intents WHERE workflow_id = ? AND step_name = ?", (intent.workflow_id, intent.step_name)).fetchone()
+            if existing is None:
+                conn.execute("""INSERT INTO external_action_intents
+                    (workflow_id, step_name, caller_request_key, action_fingerprint, canonical_envelope, canonicalization_version, definition_hash, action_id, status, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 'intent_recorded', ?)""",
+                    (intent.workflow_id, intent.step_name, intent.caller_request_key, intent.action_fingerprint, intent.canonical_envelope, intent.canonicalization_version, intent.definition_hash, intent.created_at))
+                conn.execute("UPDATE workflows SET current_step = ?, status = ?, updated_at = ? WHERE workflow_id = ?", (step_index, WorkflowStatus.WAITING_EXTERNAL_ACTION.value, utc_now(), intent.workflow_id))
+            else:
+                for field in ("caller_request_key", "action_fingerprint", "canonical_envelope", "canonicalization_version", "definition_hash"):
+                    if existing[field] != getattr(intent, field):
+                        raise ValueError(f"external action intent is immutable: {field}")
+        return self.get_external_action_intent(intent.workflow_id, intent.step_name)
+
+    def get_external_action_intent(self, workflow_id: str, step_name: str) -> ExternalActionIntent | None:
+        with self.connect() as conn:
+            row = conn.execute("SELECT * FROM external_action_intents WHERE workflow_id = ? AND step_name = ?", (workflow_id, step_name)).fetchone()
+        return None if row is None else ExternalActionIntent(**dict(row))
+
+    def mark_external_action_submitted(self, workflow_id: str, step_name: str, action_id: str) -> None:
+        with self.connect() as conn:
+            conn.execute("UPDATE external_action_intents SET action_id = ?, status = 'submitted' WHERE workflow_id = ? AND step_name = ?", (action_id, workflow_id, step_name))
+
+    def set_external_action_definition_hash(self, workflow_id: str, step_name: str, definition_hash: str) -> None:
+        with self.connect() as conn:
+            conn.execute("UPDATE external_action_intents SET definition_hash = ? WHERE workflow_id = ? AND step_name = ?", (definition_hash, workflow_id, step_name))
+
+    def mark_external_action_terminal_read(self, workflow_id: str, step_name: str) -> None:
+        with self.connect() as conn:
+            conn.execute("UPDATE external_action_intents SET status = 'terminal_read' WHERE workflow_id = ? AND step_name = ?", (workflow_id, step_name))
 
     def _row_to_state(self, row: Any) -> WorkflowState:
         return WorkflowState(
@@ -484,6 +549,21 @@ class PostgresWorkflowStore(WorkflowStore):
                     step_name       TEXT NOT NULL,
                     result          TEXT NOT NULL,
                     executed_at     TEXT NOT NULL,
+                    FOREIGN KEY (workflow_id) REFERENCES workflows(workflow_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS external_action_intents (
+                    workflow_id TEXT NOT NULL,
+                    step_name TEXT NOT NULL,
+                    caller_request_key TEXT NOT NULL,
+                    action_fingerprint TEXT NOT NULL,
+                    canonical_envelope TEXT NOT NULL,
+                    canonicalization_version TEXT NOT NULL,
+                    definition_hash TEXT NOT NULL,
+                    action_id TEXT,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (workflow_id, step_name),
                     FOREIGN KEY (workflow_id) REFERENCES workflows(workflow_id)
                 );
 
