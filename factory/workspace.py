@@ -218,6 +218,11 @@ class Workspace:
         path, content). Replaying the same key returns the cached result
         and performs no new write side effect — the durable
         ``side_effect_log`` links the retry to the original write.
+
+        Workspace-local replay guard, not a D1/D2 control: it suppresses
+        duplicate writes to the explicitly scoped local workspace only, makes
+        no external call, and must not be cited as authorization or effect
+        reconciliation for consequential effects.
         """
         content_digest = _digest(content)
         key = self._idempotency_key(workflow_id, phase, attempt, rel_path, content_digest)

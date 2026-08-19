@@ -307,9 +307,23 @@ class WorkflowEngine:
 
     @staticmethod
     def _function_identity_hash(fn: StepFunction) -> str:
-        """The deliberately small WS0 D4 guard: module + qualified function name."""
+        """The deliberately small WS0 D4 guard.
+
+        Digests the registered function's identity (module + qualified name)
+        AND its code, so a redeployment that swaps the implementation under
+        the same name is refused, not silently adopted. Still a single
+        equality check — not general D4 migration.
+        """
         identity = f"{fn.__module__}:{fn.__qualname__}"
-        return hashlib.sha256(identity.encode("utf-8")).hexdigest()
+        try:
+            code = fn.__code__.co_code
+        except AttributeError:  # callables without a plain code object
+            code = b""
+        digest = hashlib.sha256()
+        digest.update(identity.encode("utf-8"))
+        digest.update(b"\x00")
+        digest.update(code)
+        return digest.hexdigest()
 
     def _run_context_export_final(self, workflow_id: str) -> None:
         """Final best-effort context export at completion (spec §10.3)."""

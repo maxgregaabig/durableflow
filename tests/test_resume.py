@@ -182,6 +182,68 @@ def test_consequential_pause_refuses_changed_registered_function(tmp_path: Path)
     assert calls == []
 
 
+def test_waiting_external_action_refuses_changed_registered_function(tmp_path: Path) -> None:
+    """The STALE_DEFINITION guard covers WAITING_EXTERNAL_ACTION, not just PAUSED_APPROVAL.
+
+    The changed implementation deliberately keeps the same module + qualname:
+    the digest must cover the function's code, or a redeployment that swaps
+    the body under the same name would be silently adopted (WS0 task 9).
+    The closure cell (not the code) cannot be covered by a code digest; a
+    same-qualname body change is the deployment-shaped case.
+    """
+    store = WorkflowStore(tmp_path / "stale-definition-waiting.sqlite")
+    calls: list[str] = []
+    state = store.create_workflow("test")
+    engine = WorkflowEngine(store, TelemetryLogger(echo=False))
+
+    def external_step(mode: str):
+        def fn(state, step_data, dependencies):
+            from src.engine import WaitForExternalAction
+            from src.store import ExternalActionIntent, utc_now
+
+            if store.get_external_action_intent(state.workflow_id, "external") is None:
+                store.record_external_action_intent(
+                    ExternalActionIntent(
+                        state.workflow_id,
+                        "external",
+                        "wf:external",
+                        "sha256:x",
+                        "{}",
+                        "rfc8785-jcs-1",
+                        "",
+                        None,
+                        "intent_recorded",
+                        utc_now(),
+                    ),
+                    state.current_step + 1,
+                )
+            if mode == "wait":
+                return WaitForExternalAction("external")
+            calls.append("changed")
+            return StepResult("external", {"executed": True}, 0.0)
+
+        return fn
+
+    original = external_step("wait")
+
+    def redeployed_external(state, step_data, dependencies):
+        # Same step_name, module, and qualname as ``original`` — only the
+        # body changed, which is the redeployment the digest must catch.
+        calls.append("changed")
+        return StepResult("external", {"executed": True}, 0.0)
+
+    redeployed_external.__qualname__ = original.__qualname__
+    redeployed_external.__module__ = original.__module__
+
+    engine.register_step("external", original)
+    assert engine.execute(state.workflow_id).status == WorkflowStatus.WAITING_EXTERNAL_ACTION
+
+    engine.replace_step("external", redeployed_external)
+    resumed = engine.resume(state.workflow_id)
+    assert resumed.status == WorkflowStatus.STALE_DEFINITION
+    assert calls == []
+
+
 def test_waiting_external_action_does_not_advance(tmp_path: Path) -> None:
     store = WorkflowStore(tmp_path / "waiting-external.sqlite")
     calls: list[str] = []

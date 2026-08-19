@@ -106,6 +106,13 @@ class ColonyStore:
             )
 
     def dispatch_once(self, run_id: str, job: Job, instance_id: str) -> bool:
+        """Simulation bookkeeping, not a production effect dispatch.
+
+        Marks an in-process simulated stage dispatch once per (run, job, stage)
+        so a resumed simulation does not double-count. It dispatches to no
+        provider API and is not a D1/D2 control; a real Colony provider
+        adapter must be added to the §5.2.1 inventory before it can dispatch.
+        """
         key = f"{run_id}:{job.job_id}:dispatch:{job.current_stage + 1}"
         existing = self.workflow_store.get_side_effect(key)
         if existing is not None:
