@@ -1,0 +1,88 @@
+%% DurableFlow Core Architecture & Operational Spine
+%% Sourced from docs/walkthrough.md and docs/learning-path.md
+%% Paste directly into Mermaid Live Editor (https://mermaid.live) or GitHub markdown
+
+flowchart TD
+    %% ==========================================
+    %% TOP LEVEL DRIVER / RUNTIME ENTRY POINTS
+    %% ==========================================
+    subgraph Drivers ["1. Drivers & Entry Points (examples/)"]
+        CrashDemo["<b>Crash Demo</b> (crash_resume_demo.py)<br/>• Subprocess real os._exit kill<br/>• Stale detection & resume"]
+        InboxDemo["<b>Inbox Demo</b> (inbox_triage_demo.py)<br/>• Golden path & interactive HITL<br/>• Approval vs rejection branches"]
+        Tests["<b>Pytest Suite</b> (tests/)<br/>• Deterministic local fixtures<br/>• Zero API keys required"]
+    end
+
+    %% ==========================================
+    %% CORE RUNTIME ORCHESTRATION LAYER
+    %% ==========================================
+    subgraph CoreRuntime ["2. Core Durable Runtime (src/)"]
+        direction TB
+        Engine["<b>WorkflowEngine</b> (src/engine.py)<br/>• Linear step runner (0 … N)<br/>• Step registration (name, fn)<br/>• Checkpoint after every step<br/>• Pause / resume orchestrator"]
+
+        subgraph Primitives ["6 Core Operational Primitives"]
+            direction LR
+            Context["<b>ContextSelector</b><br/>(src/context_selector.py)<br/>• TF-IDF relevance scoring<br/>• Hard token budget packing"]
+            Router["<b>ModelRouter</b><br/>(src/model_router.py)<br/>• Primary / Secondary fallback<br/>• USD cost & token tracking"]
+            Approval["<b>ApprovalGate</b><br/>(src/approval.py)<br/>• Human-in-the-Loop (HITL)<br/>• Two-phase state separation"]
+            Idempotency["<b>Idempotency Guard</b><br/>(src/workflows.py)<br/>• SHA-256 key hashing<br/>• Replay suppression"]
+        end
+
+        Telemetry["<b>TelemetryLogger</b> (src/telemetry.py)<br/>• Structured JSONL audit events<br/>• Step, fallback, approval & crash logs"]
+    end
+
+    %% ==========================================
+    %% PERSISTENT STORAGE LAYER (SQLITE WAL)
+    %% ==========================================
+    subgraph Storage ["3. Durable Persistence Layer (SQLite WAL - src/store.py)"]
+        Store["<b>WorkflowStore</b><br/>(Zero In-Memory Only State)"]
+        subgraph Tables ["4 Core SQLite Tables"]
+            T_WF[("<b>workflows</b><br/>workflow_id (PK)<br/>current_step (last completed index)<br/>step_data (JSON output map)<br/>status (running/paused/crashed/completed)")]
+            T_SR[("<b>step_results</b><br/>id (PK), workflow_id (FK)<br/>step_index, step_name, output JSON<br/>duration_ms, cost_usd, model_used")]
+            T_AQ[("<b>approval_queue</b><br/>gate_id (PK), workflow_id (FK)<br/>step_name, payload JSON<br/>status (pending/approved/rejected)")]
+            T_SE[("<b>side_effect_log</b><br/>idempotency_key (PK)<br/>workflow_id (FK), step_name<br/>result JSON, executed_at")]
+        end
+    end
+
+    %% ==========================================
+    %% THE REFERENCE WORKFLOW: INBOX TRIAGE
+    %% ==========================================
+    subgraph ReferenceWorkflow ["4. Reference Workflow: Inbox Triage (src/workflows.py)"]
+        direction LR
+        S0["Step 0<br/><b>ingest_email</b>"] --> S1["Step 1<br/><b>select_context</b>"]
+        S1 --> S2["Step 2<br/><b>triage_llm</b>"]
+        S2 --> S3["Step 3<br/><b>draft_reply</b>"]
+        S3 --> S4["Step 4<br/><b>approval_gate</b>"]
+        S4 --> S5["Step 5<br/><b>send_reply</b>"]
+    end
+
+    %% ==========================================
+    %% THE THREE CORE SPINE INVARIANTS
+    %% ==========================================
+    subgraph CoreSpine ["5. The Core Spine: 3 Durable Invariants"]
+        direction TB
+        Inv1["<b>1. The Checkpoint:</b><br/>Every completed step commits output & advances index.<br/>Failure costs 1 step, not the whole run."]
+        Inv2["<b>2. Two Status Layers:</b><br/>workflows.status (execution) moves independently<br/>from approval_queue.status (human decision)."]
+        Inv3["<b>3. The Crash Window & Replay Guard:</b><br/>External side effects check deterministic SHA-256 keys<br/>in side_effect_log to suppress double-dispatch."]
+    end
+
+    %% CONNECTIONS
+    Drivers --> Engine
+    Engine --> ReferenceWorkflow
+
+    S1 -. uses .-> Context
+    S2 -. uses .-> Router
+    S3 -. uses .-> Router
+    S4 -. uses .-> Approval
+    S5 -. uses .-> Idempotency
+
+    Engine --> Store
+    Approval --> Store
+    Idempotency --> Store
+    Engine --> Telemetry
+
+    Store --> T_WF
+    Store --> T_SR
+    Store --> T_AQ
+    Store --> T_SE
+
+    ReferenceWorkflow -. adheres to .-> CoreSpine

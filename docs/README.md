@@ -4,6 +4,7 @@ Start here after running `./start.sh crash` from the repo root.
 
 | Document | Audience | Purpose |
 |----------|----------|---------|
+| [core-overview.md](core-overview.md) | **Anyone onboarding / reviewing** | **Visual overview of DurableFlow core: architecture, operational primitives & survivability diagrams** |
 | [learning-path.md](learning-path.md) | **Anyone onboarding** | **Staged curriculum in dependency order, with a verification gate per stage — start here** |
 | [walkthrough.md](walkthrough.md) | New contributors / reviewers | Architectural throughline plus **canonical index of all 9 `*-spec.md` and 7 `README.md` files** |
 | [exercises.md](exercises.md) | Learners | Hands-on tasks to explore durability, approval, routing, and idempotency |
