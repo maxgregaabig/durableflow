@@ -2,7 +2,61 @@
 
 Visual architecture for **Durable Flow**: Python stdlib, SQLite persistence, mock model providers by default, and CLI demos.
 
-**Related docs:** [README](../README.md) (quick start) · [dflow-spec.md](dflow-spec.md) (requirements and acceptance criteria)
+**Related docs:** [README](../README.md) (quick start) · [dflow-spec.md](dflow-spec.md) (requirements and acceptance criteria) · [field-pattern.md](field-pattern.md) (deployment pattern)
+
+## Mechanisms, Preconditions, and Residuals
+
+This is the discriminating view of the reference runtime. It describes what
+the mechanisms demonstrate today; it does not treat a layer diagram as proof
+of an action/effect boundary. The table is sourced from the alignment
+[proposal §2.3](../proposals/delta-abep-aegis-alignment-proposal.md#23-the-opening-architecture-is-descriptive-not-discriminating).
+
+| Mechanism | Assumed precondition | What DurableFlow proves | Residual delta |
+|---|---|---|---|
+| Workflow checkpointing | Replayed activities are safe | Local steps resume from durable checkpoints | Consequential effects require a separate effect authority |
+| Human workflow gate | Approved state remains attached to the intended effect | Pause, persist, approve/reject, resume | Approval must bind exact action and mutable preconditions |
+| Idempotency key | Endpoint honors the key and exposes a stable operation identity | Mock result is locally replay-suppressed | Unknown remote outcomes require resolution and reconciliation |
+| Versioned workflow | Running work retains compatible semantics | Consequential local pauses refuse a changed registered function identity | Pin or refuse changed definitions for all in-flight work remains external scope |
+
+## Stack Overview
+
+High-level view of where DurableFlow sits between agent reasoning and production deployment.
+
+```mermaid
+flowchart TD
+    Agent[AGENT]
+
+    Planning[Planning]
+    Execution[Execution]
+
+    DurableFlow[DurableFlow]
+
+    Recovery[Recovery]
+    HITL[HITL]
+    Context[Context]
+    Eval[Eval]
+    Observability[Observability]
+
+    Production[Production]
+
+    Agent --> Planning
+    Agent --> Execution
+
+    Planning --> DurableFlow
+    Execution --> DurableFlow
+
+    DurableFlow --> Recovery
+    DurableFlow --> HITL
+    DurableFlow --> Context
+    DurableFlow --> Eval
+    DurableFlow --> Observability
+
+    Recovery --> Production
+    HITL --> Production
+    Context --> Production
+    Eval --> Production
+    Observability --> Production
+```
 
 ## How To Read This Document
 
@@ -20,8 +74,8 @@ Each section is a Mermaid diagram plus brief prose. The diagrams describe **what
 
 1. **Checkpoint after every completed step** — `save_checkpoint()` writes to `step_results` and merges output into `step_data` before the next step runs.
 2. **Pause on human gate** — a step returning `PauseForApproval` persists a pending checkpoint and sets `paused_approval`; execution stops until `resume()`.
-3. **Idempotency before side effects** — `send_reply` checks `side_effect_log` before executing; duplicate keys return the logged result.
-4. **Hard token budget** — `ContextSelector` never returns items whose summed `token_count` exceeds the budget (4096 in inbox triage).
+3. **Local replay suppression for the mock send** — `send_reply` checks `side_effect_log` before constructing a new mock result; duplicate keys return the logged result. Remote exactly-once delivery requires downstream idempotency or an outbox/reconciliation design.
+4. **Hard token budget** — `ContextSelector` never returns items whose summed `token_count` exceeds the caller-supplied budget (300 in the reference workflow; 4096 in the large-corpus acceptance test).
 5. **No in-memory-only workflow state** — all durable state lives in SQLite (`workflows`, `step_results`, `approval_queue`, `side_effect_log`).
 
 SQLite uses WAL mode and `PRAGMA busy_timeout = 30000` for local durability. There is no concurrent multi-workflow execution in this reference runtime.
@@ -48,6 +102,12 @@ flowchart LR
 ```
 
 The engine orchestrates registered steps. Step bodies live on `InboxTriageWorkflow` and call selector, router, approval, and store through a shared dependencies dict (including telemetry injected by the engine).
+
+## Extension Pattern
+
+Sibling extension packages may use the fixed-step `WorkflowEngine` when their work naturally maps to registered steps, or they may wrap the lower-level `WorkflowStore` directly when their domain has its own execution loop. In both cases, extensions keep their schemas additive, store durable checkpoints through `WorkflowStore`, and use `TelemetryLogger.log_event()` for domain-specific events.
+
+Current implemented examples follow both shapes: Readiness registers agent turns as deterministic workflow steps, while Colony adds `colony_*` tables and checkpoints job stages through `WorkflowStore.save_checkpoint()`. Draft extensions such as Target Planner should follow the same boundary: no core table rewrites, no hidden in-memory state, and no new claim in this architecture document until the implementation exists.
 
 ## Module Dependencies
 
@@ -141,7 +201,7 @@ sequenceDiagram
 
     Engine->>Telemetry: log_step_start(select_context)
     Engine->>Steps: select_context()
-    Steps->>Selector: select(query, corpus, budget=4096)
+    Steps->>Selector: select(query, corpus, budget=300)
     Selector-->>Steps: ranked ContextItems
     Steps-->>Engine: StepResult(context)
     Engine->>Store: save_checkpoint(index 1)
@@ -369,7 +429,7 @@ flowchart TD
     Scores --> Sort[Sort by score descending]
     Sort --> Pack[Greedy budget packing]
     TokenCounts --> Pack
-    Budget[4096 token budget in inbox triage] --> Pack
+    Budget[Caller-supplied token budget<br/>300 in reference workflow] --> Pack
     Pack --> Selected[Selected context]
     Selected --> Constraint{sum token_count <= budget}
 ```
@@ -387,8 +447,8 @@ flowchart TD
     HashPayload --> Key[sha256 workflow_id step_name payload_hash]
     Key --> Lookup{side_effect_log contains key?}
     Lookup -- yes --> Existing[Return logged result idempotent_skip=true]
-    Lookup -- no --> SideEffect[Execute mock send]
-    SideEffect --> Log[Write side_effect_log]
+    Lookup -- no --> MockResult[Construct mock send result]
+    MockResult --> Log[Write side_effect_log]
     Log --> Result[Return sent result]
 ```
 

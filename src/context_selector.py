@@ -3,10 +3,36 @@ from __future__ import annotations
 import math
 import re
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+from typing import Literal
 
 
 TOKEN_RE = re.compile(r"[a-z0-9]+")
+
+
+@dataclass(frozen=True)
+class RetrievalCandidate:
+    """A candidate from retrieval with score and rank."""
+    item: ContextItem
+    score: float
+    rank: int  # 1-indexed position in ranked results
+
+
+@dataclass(frozen=True)
+class SelectionResult:
+    """Result of context selection with assembly lineage."""
+    selected: list[tuple[RetrievalCandidate, int]]  # (candidate, budget_position)
+    rejected: list[tuple[RetrievalCandidate, str]]  # (candidate, rejection_reason)
+    retrieval_method: str = "bm25"
+
+    @property
+    def selected_items(self) -> list[ContextItem]:
+        return [candidate.item for candidate, _ in self.selected]
+
+    @property
+    def retrieved_count(self) -> int:
+        return len(self.selected) + len(self.rejected)
 
 
 @dataclass(frozen=True)
@@ -24,9 +50,14 @@ class ContextSelector:
         query: str,
         corpus: list[ContextItem],
         token_budget: int,
-    ) -> list[ContextItem]:
+    ) -> SelectionResult:
+        """Select context items from corpus, recording assembly lineage."""
         if token_budget <= 0 or not corpus:
-            return []
+            return SelectionResult(
+                selected=[],
+                rejected=[(RetrievalCandidate(item, 0.0, rank + 1), "token_budget")
+                          for rank, item in enumerate(corpus)],
+            )
         scored = self._score_relevance(query, corpus)
         return self._pack_budget(scored, token_budget)
 
@@ -60,16 +91,27 @@ class ContextSelector:
         self,
         scored_items: list[tuple[float, ContextItem]],
         token_budget: int,
-    ) -> list[ContextItem]:
-        selected: list[ContextItem] = []
+    ) -> SelectionResult:
+        selected: list[tuple[RetrievalCandidate, int]] = []
+        rejected: list[tuple[RetrievalCandidate, str]] = []
         used = 0
-        for _, item in scored_items:
+        budget_position = 0
+        for rank, (score, item) in enumerate(scored_items, start=1):
+            candidate = RetrievalCandidate(item, score, rank)
             if item.token_count <= 0:
+                rejected.append((candidate, "zero_token_count"))
                 continue
             if used + item.token_count <= token_budget:
-                selected.append(item)
+                selected.append((candidate, budget_position))
+                budget_position += 1
                 used += item.token_count
-        return selected
+            else:
+                rejected.append((candidate, "token_budget"))
+        return SelectionResult(
+            selected=selected,
+            rejected=rejected,
+            retrieval_method="bm25",
+        )
 
     def _terms(self, text: str) -> list[str]:
         return TOKEN_RE.findall(text.lower())

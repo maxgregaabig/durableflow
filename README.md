@@ -6,12 +6,14 @@ Most agent demos optimize for intelligence. DurableFlow is a small educational l
 
 In production, use established tools such as Temporal, LangGraph, LiteLLM, and LangSmith. This repo exists because those tools are intentionally large and capable; DurableFlow strips the core ideas down to local SQLite, standard Python, deterministic fixtures, and tests you can read in one sitting.
 
-DurableFlow now has two extension tracks:
+DurableFlow now has four extension tracks:
 
 | Extension | Status | What it demonstrates |
 |-----------|--------|----------------------|
 | [Colony](colony/README.md) | Implemented benchmark | Durable execution can turn spot-like compute into completable long-running work, measured against a naive baseline under the same seeded loss schedule. |
 | [Agent Readiness Pack](readiness/README.md) | Implemented demo | A readiness harness shape for deciding whether an agent is deployable: durable turns, gated writes, failure injection, and a verdict-first report. |
+| [Context](context/README.md) | Implemented MVP | Durable information lineage: what was observed, selected, consumed by model steps, and explicitly credited as influential. |
+| [Target Planner](planner/planner-spec.md) | Draft spec | Budgeted, local-first target selection with verifiable escalation across local and cloud tiers. |
 
 ## Quick start
 
@@ -23,6 +25,7 @@ cd durableflow
 ./start.sh crash     # crash recovery demo (start here)
 ./start.sh test      # full test suite
 ./start.sh inbox     # interactive approval demo
+./start.sh context   # inbox triage plus context audit trace
 ./start.sh readiness # agent readiness before/after report
 ./start.sh mcp       # gated write over MCP CRM server
 ```
@@ -46,12 +49,12 @@ A minimal Python runtime for multi-step LLM and agentic workflows. It demonstrat
 - **Crash recovery** — real process kill (`os._exit`) in a subprocess, not mocked exceptions
 - **Approval gates** — pause until an operator approves or rejects; persists across restart
 - **Model routing** — primary/secondary fallback with per-step USD cost accounting
-- **Context selection** — TF-IDF ranking under a hard token budget (4096 in inbox triage)
-- **Idempotency** — side-effect log prevents duplicate send on crash/retry
+- **Context selection** — TF-IDF ranking under a caller-supplied hard token budget (300 in the reference workflow; tested at 4096)
+- **Replay suppression** — deterministic keys let the side-effect log reuse mock-send results
 
 It is not another assistant framework. It is the small operational layer underneath one.
 
-See **[docs/dflow-arch.md](docs/dflow-arch.md)** for diagrams and invariants.
+See **[docs/dflow-arch.md](docs/dflow-arch.md)** for diagrams and invariants. For a full-repo architectural walkthrough (why each package exists and how extensions fit), see **[docs/walkthrough.md](docs/walkthrough.md)**.
 
 ## Extension: Colony
 
@@ -113,11 +116,38 @@ These scores come from deterministic local fixtures. The point is the evaluation
 - model fallback
 - crash after side effect
 
-The report is intentionally verdict-first: "ship" or "do not ship," the durability delta, and the single unsafe behavior that blocks deployment. The demo writes `readiness.json` and `readiness_report.md`.
+The report is intentionally verdict-first: "ship" or "do not ship," the durability delta, and the single readiness-scoring behavior that blocks a recommendation. The demo writes `readiness.json` and `readiness_report.md`; it is not a platform-safety guarantee.
 
 The MCP path uses the official `mcp==1.13.1` client/server protocol when the optional package is installed, and falls back to a tiny stdio JSON protocol so the demo remains dependency-free. The ADK path is currently an adapter boundary: it verifies `google-adk==1.18.0` import, ADK `Agent` object construction, history conversion, and resume-safe behavior with an ADK-compatible mock. It does not yet claim real Google ADK Runner end-to-end execution.
 
 Start with **[readiness/README.md](readiness/README.md)** for the implementation map, scenarios, and build contract. The full spec remains at **[readiness/docs/dflow-readiness-spec.md](readiness/docs/dflow-readiness-spec.md)**.
+
+## Extension: Target Planner
+
+**Budgeted, local-first target selection with verifiable escalation.**
+
+Target Planner is a draft sibling extension, implemented under `planner/`. It is scoped as an OpenAI-compatible proxy that accepts `"model": "auto"` plus declarative constraints, selects an ordered target plan under budget, privacy, latency, and tier constraints, then records each attempt as a durable outcome. Explicit model names bypass the target planner.
+
+The intended implementation reuses DurableFlow's SQLite-backed checkpoint store and cost-accounted model routing patterns, but adds target-planner-owned tables for targets, plan traces, target statistics, outcomes, and session budgets. Escalation is based on verifiable outcomes only: transport success, latency within budget, and optional caller-supplied output checks. It does not claim to predict answer quality.
+
+Read **[planner/planner-spec.md](planner/planner-spec.md)** for the draft contract and implementation gates.
+
+## Extension: Context
+
+**Durable information state alongside durable execution state.**
+
+Context adds a small ledger for the inbox triage workflow so an operator can see what information was observed, retrieved, selected, consumed by model steps, and explicitly credited as influential by the mock model.
+
+```bash
+python3 examples/inbox_triage_context_demo.py
+python3 -m context.cli audit --db examples/inbox_triage_context_demo.sqlite --workflow-id wf-context-demo
+```
+
+v0.2a adds **assembly lineage**: retrieved and rejected events that track how candidate information competed for context budget, with metadata validation and audit summary counts.
+
+The ledger stores digests and source references by default, not raw email bodies, prompts, or model responses. Supersession labeling, context replay, and per-artifact retrieval inspection are roadmap capabilities.
+
+Start with **[context/README.md](context/README.md)** for the product-level explanation, then read **[docs/context-extension.md](docs/context-extension.md)** for the schema, audit contract, privacy boundary, and before/after comparison.
 
 ## Architecture notes: scaling LLM-powered assistants
 
@@ -129,7 +159,7 @@ The second problem is partial failure. Assistant workflows depend on model provi
 
 The third problem is cost control. Autonomous mode increases inference volume because the system starts making calls in the background. Cost accounting has to be per workflow and per step, not a monthly surprise. The model router computes cost from estimated input and output tokens using model-specific pricing and records the model used for each call.
 
-The fourth problem is human approval latency. Many useful assistant actions are not safe to execute automatically: sending email, rescheduling meetings, making commitments, or exposing sensitive context. The approval gate here persists a pending decision and pauses the workflow until an operator approves or rejects it. That is a small mechanism, but it changes the system from "agent loop" to "controlled execution."
+The fourth problem is human approval latency. Many useful assistant actions are not safe to execute automatically: sending email, rescheduling meetings, making commitments, or exposing sensitive context. The approval gate here persists a pending decision and pauses the workflow until an operator approves or rejects it. That is durable workflow interruption, not an authorization boundary or a defense against a deceived approver.
 
 The fifth problem is observability across non-deterministic paths. Model fallback, user rejection, crash recovery, and skipped side effects are all meaningful events. The telemetry logger writes JSON lines for steps, approvals, crashes, fallback, and workflow completion so the path can be audited after the run.
 
@@ -188,6 +218,8 @@ durableflow/
     render.py
     docs/
       dflow-readiness-spec.md
+  planner/
+    planner-spec.md
   mcp_server/
     legacy_crm.py
   data/
@@ -206,7 +238,7 @@ TF-IDF is used instead of embeddings because this repo is about operational prim
 
 Mock providers are the default so demos and tests run on a clean machine. Optional Anthropic integration is gated by `ANTHROPIC_API_KEY` and the `providers` extra.
 
-Side effects use deterministic idempotency keys. Before the mock email send runs, the workflow checks the side-effect log. If recovery replays the send step after a crash, the existing result is returned and the email is not sent twice.
+The mock send uses a deterministic idempotency key. It checks the side-effect log before constructing and persisting a new mock result; recovery reuses an existing result. This demonstrates local replay suppression, not atomic exactly-once delivery to a remote email service. A real adapter must pass the key to a service that honors it or use an outbox/reconciliation design.
 
 Token counting is approximate: whitespace word count divided by 0.75. A production implementation would use a tokenizer matched to the target model.
 
@@ -222,7 +254,7 @@ If you are deploying agentic workflows in production, you should use established
 
 ### DurableFlow vs. LangGraph / CrewAI
 * **What they do:** Powerful libraries and runtimes for agent orchestration, graph state, reasoning loops, persistence, and human-in-the-loop workflows.
-* **Why not LangGraph/CrewAI here:** DurableFlow is not trying to compete with those frameworks. It isolates a few operational primitives in plain Python so you can see exactly what is persisted, when a checkpoint is written, how an approval pause resumes, and how idempotency prevents duplicate side effects. It is a teaching fixture and test harness, not a better agent framework.
+* **Why not LangGraph/CrewAI here:** DurableFlow is not trying to compete with those frameworks. It isolates a few operational primitives in plain Python so you can see exactly what is persisted, when a checkpoint is written, how an approval pause resumes, and how a known mock result is locally replay-suppressed. It is a teaching fixture and test harness, not a better agent framework or a remote-effect authority.
 
 ### DurableFlow vs. LangSmith / Arize Phoenix
 * **What they do:** Tracing, logging, and evaluation datasets.

@@ -13,7 +13,7 @@ from typing import Any
 
 from src.approval import ApprovalGate, ApprovalRequest
 from src.context_selector import ContextItem, ContextSelector, estimate_tokens
-from src.engine import ApprovalRejectionPolicy, PauseForApproval, WorkflowEngine, WorkflowStep
+from src.engine import ApprovalRejectionPolicy, PauseForApproval, WaitForExternalAction, WorkflowEngine, WorkflowStep
 from src.model_router import ModelRouter, RoutingPolicy, default_policy
 from src.store import StepResult, WorkflowState, WorkflowStatus, WorkflowStore
 from src.telemetry import TelemetryLogger
@@ -76,6 +76,7 @@ class AgentRunner:
     db_path: Path | None = None
     auto_approve: bool = True
     auto_reject_writes: set[str] = field(default_factory=set)
+    aegis_client: Any | None = None
 
     def __post_init__(self) -> None:
         self.tool_map = {tool.name: tool for tool in self.tools}
@@ -92,11 +93,13 @@ class AgentRunner:
         approval = ApprovalGate(store)
         telemetry = TelemetryLogger(echo=False)
         dependencies: dict[str, Any] = {
+            "store": store,
             "approval_gate": approval,
             "approval_rejection_policies": {},
             "approval_commit_handlers": {},
             "agent_context": context,
             "agent_runner": self,
+            "aegis_client": self.aegis_client,
         }
         engine = WorkflowEngine(store, telemetry, dependencies)
         self.register(engine)
@@ -143,11 +146,19 @@ class AgentRunner:
             steps.append(WorkflowStep(name, self._make_turn_step(index, name)))
             engine.dependencies["approval_rejection_policies"][name] = ApprovalRejectionPolicy.CONTINUE
             engine.dependencies["approval_commit_handlers"][name] = self._make_commit_handler(index, name)
+            engine.dependencies.setdefault("consequential_approval_steps", set()).add(name)
         engine.register_steps(steps)
 
     def _make_turn_step(self, turn_index: int, step_name: str):
         def run_turn(state: WorkflowState, step_data: dict[str, Any], dependencies: dict[str, Any]):
             history = self._history_from_step_data(step_data)
+            client = dependencies.get("aegis_client")
+            if client is not None and dependencies["store"].get_external_action_intent(state.workflow_id, step_name):
+                result = client.run_action(dependencies["store"], state, step_name)
+                if isinstance(result, WaitForExternalAction):
+                    return result
+                history = history + [{"turn_index": len(history), "thought": "Aegis resolved the write.", "tool_name": None, "tool_args": {}, "observation": result.output, "is_terminal": False, "final_answer": None}]
+                return StepResult(step_name, {"agent_history": history, **result.output}, result.duration_ms)
             if history and history[-1].get("is_terminal"):
                 return StepResult(step_name, {"agent_history": history, "skipped_after_terminal": True}, 0.0)
             context = dict(dependencies.get("agent_context", {}))
@@ -158,7 +169,8 @@ class AgentRunner:
                     [ContextItem("history", prompt, "agent", "", estimate_tokens(prompt))],
                     self.token_budget,
                 )
-                prompt = selected[0].content if selected else " ".join(prompt.split()[: self.token_budget])
+                selected_items = selected.selected_items
+                prompt = selected_items[0].content if selected_items else " ".join(prompt.split()[: self.token_budget])
             response = ModelRouter().route(prompt, "Reason over the next support-agent action.", self.routing_policy)
             telemetry: TelemetryLogger = dependencies["telemetry"]
             if response.was_fallback:
@@ -184,6 +196,19 @@ class AgentRunner:
                 return StepResult(step_name, {"agent_history": history}, response.latency_ms, response.cost_usd, response.model_used)
             tool = self.tool_map[turn.tool_name]
             if tool.is_write:
+                if client is not None:
+                    envelope = {
+                        "schema_version": "1.0", "canonicalization_version": "rfc8785-jcs-1",
+                        "operation": f"durableflow/tool/{tool.name}", "target": tool.name, "arguments": turn.tool_args,
+                        "preconditions": {}, "tenant_id": "derived-by-aegis", "requesting_principal": "derived-by-aegis",
+                        "tool_binding": f"durableflow/{tool.name}@1", "policy_ref": "durableflow-aegis@1",
+                        "caller_request_key": f"{state.workflow_id}:{step_name}", "caller_execution_ref": state.workflow_id,
+                    }
+                    result = client.run_action(dependencies["store"], state, step_name, envelope)
+                    if isinstance(result, WaitForExternalAction):
+                        return result
+                    history = self._append_history(history, turn, result.output)
+                    return StepResult(step_name, {"agent_history": history, **result.output}, response.latency_ms, response.cost_usd, response.model_used)
                 gate_id = dependencies["approval_gate"].request_approval(
                     state.workflow_id,
                     step_name,

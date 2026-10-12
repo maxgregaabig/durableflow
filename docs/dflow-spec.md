@@ -40,7 +40,7 @@ Scenario: Golden path -- email triage with approval
   Given a new email arrives in the mock inbox
   And a user context corpus of 50 prior emails and 10 calendar events
   When the inbox triage workflow executes
-  Then the engine selects relevant context within the token budget (4096 tokens)
+  Then the engine selects relevant context within the reference workflow's 300-token budget
   And the triage step classifies the email as "action_required" or "informational"
   And if action_required, the draft step produces a reply
   And the workflow pauses at the approval gate
@@ -57,14 +57,12 @@ Scenario: Crash recovery mid-workflow
   And completes the remaining steps without re-executing prior steps
   And the telemetry log shows the crash and recovery event
 
-Scenario: Idempotent send on crash-after-side-effect
+Scenario: Mock send replay suppression
   Given a workflow that has completed draft_reply and approval_gate
-  And the send_reply step executes successfully (side effect: email sent)
-  And the process crashes before the checkpoint is written
-  When the engine restarts and resumes from approval_gate
+  And the send_reply step has persisted its deterministic mock result
+  When the send_reply step is invoked again with the same workflow and payload
   Then the send_reply step checks the side-effect log for an existing idempotency key
-  And skips the duplicate send
-  And checkpoints normally
+  And returns the logged result instead of producing a second mock result
 
 Scenario: Approval rejection
   Given a workflow paused at the approval gate with a draft reply
@@ -91,7 +89,7 @@ Scenario: Model fallback on provider failure
 
 Scenario: Context budget enforcement
   Given a user corpus of 200 emails totaling 80,000 tokens
-  And a token budget of 4096 tokens for the triage step
+  And a caller-supplied token budget of 4096 tokens
   When the context selector runs
   Then it returns a subset of emails ranked by relevance to the incoming email
   And the total token count of the selected context is at or below 4096
@@ -175,16 +173,16 @@ Scenario: Cost accounting per workflow
 - `check_approval()` is non-blocking; returns current status
 - Engine integration: when a step returns a `PauseForApproval` sentinel, the engine persists state and stops
 
-#### workflows.py -- Idempotency for side effects
+#### workflows.py -- Local replay suppression for the mock send
 
-The `send_reply` step (and any future step with external side effects) must implement idempotency:
+The reference `send_reply` step demonstrates local replay suppression for a mock result:
 
-1. Before executing the side effect, generate a deterministic idempotency key: `sha256(workflow_id + step_name + payload_hash)`
+1. Before producing the mock result, generate a deterministic idempotency key: `sha256(workflow_id + step_name + payload_hash)`
 2. Check the `side_effect_log` table for this key
 3. If the key exists, skip execution and return the logged result
-4. If the key does not exist, execute the side effect, write the key + result to `side_effect_log`, then return
+4. If the key does not exist, construct the mock result, write the key + result to `side_effect_log`, then return
 
-This handles the specific crash window between "side effect executed" and "checkpoint written." Without it, a crash-recovery resume would re-send an email that was already sent.
+This prevents the mock result from being produced twice between the side-effect-log write and the engine checkpoint. It does **not** make an uncoordinated remote effect exactly-once. Any future external adapter must pass the key to a downstream service that enforces idempotency, or use an outbox/reconciliation design.
 
 ```
 side_effect_log table:
@@ -216,7 +214,7 @@ side_effect_log table:
 - [ ] Approval rejection terminates the workflow with status `rejected`
 - [ ] Extension workflows may set `dependencies["approval_rejection_policies"][step_name] = "continue"` so a rejected approval is checkpointed as `{"approved": false, ...}` and execution resumes at the next step
 - [ ] Workflow steps access prior step outputs via `step_data` dict, not global state
-- [ ] `send_reply` checks side-effect log before executing; skips if idempotency key exists
+- [ ] `send_reply` checks the side-effect log before producing a new mock result; reuses the logged result if the key exists
 
 ### Phase 3: Telemetry, Demos, & Mock Data
 
@@ -399,7 +397,7 @@ The semantics-policy's UI Semantic Data Model (section 5), presentation contract
 | T-CTX-002 | test_context_budget.py | Relevance ranking | Top item is semantically closest to query (verified with known corpus) |
 | T-CTX-003 | test_context_budget.py | Empty corpus | Returns empty list, no crash |
 | T-CTX-004 | test_context_budget.py | Budget smaller than smallest item | Returns empty list, no crash |
-| T-IDP-001 | test_resume.py | Send step executes, key logged, step re-runs | Second execution skips side effect, returns logged result |
+| T-IDP-001 | test_resume.py | Mock send result is logged, then the step is invoked again | Second invocation reuses the logged result |
 
 **Target acceptance criteria:**
 - [ ] All tests pass with `pytest tests/`
@@ -481,8 +479,8 @@ main()
             -> send_reply_fn(state, step_data, deps)
                  -> compute idempotency_key = sha256(workflow_id + "send_reply" + payload_hash)
                  -> store.check_side_effect(idempotency_key)
-                 -> if exists: return logged result (skip send)
-                 -> if not: execute mock send, store.log_side_effect(key, result)
+                 -> if exists: return logged result
+                 -> if not: construct mock send result, store.log_side_effect(key, result)
                  -> returns StepResult(output={"sent": true})
             -> store.save_checkpoint(...)
             -> store.update_status(workflow_id, "completed")
@@ -569,7 +567,7 @@ For each claimed capability:
 - [ ] Model routing: verify `model_router.py` iterates providers; verify fallback on exception/timeout
 - [ ] Cost accounting: verify `ModelResponse.cost_usd` is computed from token counts and per-model pricing
 - [ ] Context selection: verify `context_selector.py` enforces token budget ceiling; verify TF-IDF scoring
-- [ ] Idempotency: verify `send_reply` checks `side_effect_log` before executing; verify skip on duplicate key
+- [ ] Replay suppression: verify `send_reply` checks `side_effect_log` before producing a new mock result; verify reuse on duplicate key
 - [ ] Telemetry: verify JSON lines output with required fields
 
 ### 6.2 Acceptance Criteria Checklist
@@ -633,7 +631,7 @@ For each claimed capability:
 
 **Deferred items (accepted technical debt):**
 - Token counting is approximate (word-based, not tiktoken). Documented in README.
-- TF-IDF is basic (no IDF smoothing, no sublinear TF scaling). Sufficient for demonstrating the pattern.
+- TF-IDF is basic (smoothed IDF, but no document-length normalization or sublinear TF scaling). Sufficient for demonstrating the pattern.
 - No real email/calendar API integration. Mock data only. Documented in README.
 - No concurrent workflow execution. Single-workflow-at-a-time. Production would require Temporal or equivalent.
 
@@ -662,7 +660,7 @@ Before reporting DONE:
 - [ ] Read actual implementation of `model_router.py`: verify fallback loop iterates providers list, not just try/except on one
 - [ ] Read actual implementation of `context_selector.py`: verify token budget is enforced as a hard ceiling
 - [ ] Read actual implementation of `crash_resume_demo.py`: verify crash uses subprocess isolation (not just try/except)
-- [ ] Read actual implementation of `send_reply` step: verify idempotency key check before side effect
+- [ ] Read actual implementation of `send_reply`: verify key lookup precedes construction of a new mock result
 - [ ] Verify no TODO comments related to durability, approval, routing, context selection, cost tracking, or idempotency
 
 ### 9.3 Code Quality Escalation
@@ -708,7 +706,7 @@ Before marking any phase COMPLETE:
 - NEVER claim "crash recovery" if the demo uses try/except instead of process-level crash
 - NEVER claim "cost tracking" if cost is hardcoded rather than computed from token counts
 - NEVER claim "context budget" if the selector can exceed the budget ceiling
-- NEVER claim "idempotent" if the side-effect log is not checked before execution
+- NEVER claim remote exactly-once delivery from the local side-effect log; require downstream idempotency or an outbox/reconciliation design
 - NEVER reference a specific company's internal architecture as fact without "public evidence suggests" qualifier and a public source link
 
 ### 10.4 Victory Declaration Anti-Patterns
@@ -720,7 +718,7 @@ Before marking any phase COMPLETE:
 | Mock == Real | README implies production-grade system | README explicitly states "This is not a production system" |
 | Crash demo is fake | Demo catches exception instead of killing process | Demo must use subprocess + `os._exit(1)` |
 | Cost is decoration | Cost field present but always 0.0 | Cost computed from mock-realistic token counts and per-model pricing |
-| Idempotency is claimed but not implemented | send_reply has no side-effect log check | send_reply must check before executing; test T-IDP-001 verifies |
+| Local replay suppression is claimed but not implemented | `send_reply` has no side-effect-log check | Check before producing a new mock result; T-IDP-001 verifies reuse |
 
 ---
 

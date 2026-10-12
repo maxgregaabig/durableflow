@@ -27,6 +27,8 @@ class WorkflowStatus(StrEnum):
     COMPLETED = "completed"
     FAILED = "failed"
     CRASHED = "crashed"
+    STALE_DEFINITION = "stale_definition"
+    WAITING_EXTERNAL_ACTION = "waiting_external_action"
 
 
 @dataclass(frozen=True)
@@ -52,6 +54,21 @@ class StepResult:
     def __post_init__(self) -> None:
         if not self.timestamp:
             object.__setattr__(self, "timestamp", utc_now())
+
+
+@dataclass(frozen=True)
+class ExternalActionIntent:
+    """Caller recovery state only; Aegis remains the receipt/effect authority."""
+    workflow_id: str
+    step_name: str
+    caller_request_key: str
+    action_fingerprint: str
+    canonical_envelope: str
+    canonicalization_version: str
+    definition_hash: str
+    action_id: str | None
+    status: str
+    created_at: str
 
 
 def utc_now() -> str:
@@ -117,6 +134,7 @@ class WorkflowStore:
                     decided_at      TEXT,
                     decided_by      TEXT,
                     rejection_reason TEXT,
+                    definition_hash TEXT,
                     FOREIGN KEY (workflow_id) REFERENCES workflows(workflow_id)
                 );
 
@@ -129,11 +147,34 @@ class WorkflowStore:
                     FOREIGN KEY (workflow_id) REFERENCES workflows(workflow_id)
                 );
 
+                CREATE TABLE IF NOT EXISTS external_action_intents (
+                    workflow_id TEXT NOT NULL,
+                    step_name TEXT NOT NULL,
+                    caller_request_key TEXT NOT NULL,
+                    action_fingerprint TEXT NOT NULL,
+                    canonical_envelope TEXT NOT NULL,
+                    canonicalization_version TEXT NOT NULL,
+                    definition_hash TEXT NOT NULL,
+                    action_id TEXT,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (workflow_id, step_name),
+                    FOREIGN KEY (workflow_id) REFERENCES workflows(workflow_id)
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_workflows_status ON workflows(status);
                 CREATE INDEX IF NOT EXISTS idx_approval_status ON approval_queue(status);
                 CREATE INDEX IF NOT EXISTS idx_step_results_workflow ON step_results(workflow_id);
                 """
             )
+            # Existing DurableFlow databases predate the narrow D4 guard.
+            # This is deliberately only a function-identity equality value;
+            # it is not an authorization or policy field.
+            try:
+                conn.execute("ALTER TABLE approval_queue ADD COLUMN definition_hash TEXT")
+            except Exception as exc:
+                if "duplicate column" not in str(exc).lower():
+                    raise
 
     def create_workflow(
         self,
@@ -221,7 +262,7 @@ class WorkflowStore:
             rows = conn.execute(
                 """
                 SELECT * FROM workflows
-                WHERE status IN (?, ?, ?, ?)
+                WHERE status IN (?, ?, ?, ?, ?)
                 ORDER BY updated_at ASC
                 """,
                 (
@@ -229,6 +270,7 @@ class WorkflowStore:
                     WorkflowStatus.RUNNING.value,
                     WorkflowStatus.PAUSED_APPROVAL.value,
                     WorkflowStatus.APPROVED.value,
+                    WorkflowStatus.WAITING_EXTERNAL_ACTION.value,
                 ),
             ).fetchall()
         return [self._row_to_state(row) for row in rows]
@@ -287,6 +329,7 @@ class WorkflowStore:
         step_name: str,
         result: dict[str, Any],
     ) -> None:
+        """Local mock-replay suppression, not effect reconciliation: it has no remote reference, ``unknown`` state, or reconciliation deadline."""
         with self.connect() as conn:
             conn.execute(
                 """
@@ -321,7 +364,48 @@ class WorkflowStore:
             row = conn.execute(query, params).fetchone()
         return int(row["count"])
 
-    def _row_to_state(self, row: sqlite3.Row) -> WorkflowState:
+    def record_approval_definition_hash(self, gate_id: str, definition_hash: str) -> None:
+        """Attach the sanctioned narrow D4 identity guard to a pending local gate."""
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE approval_queue SET definition_hash = ? WHERE gate_id = ?",
+                (definition_hash, gate_id),
+            )
+
+    def record_external_action_intent(self, intent: ExternalActionIntent, step_index: int) -> ExternalActionIntent:
+        """Atomically durably record a request before its first HTTP attempt."""
+        with self.connect() as conn:
+            existing = conn.execute("SELECT * FROM external_action_intents WHERE workflow_id = ? AND step_name = ?", (intent.workflow_id, intent.step_name)).fetchone()
+            if existing is None:
+                conn.execute("""INSERT INTO external_action_intents
+                    (workflow_id, step_name, caller_request_key, action_fingerprint, canonical_envelope, canonicalization_version, definition_hash, action_id, status, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 'intent_recorded', ?)""",
+                    (intent.workflow_id, intent.step_name, intent.caller_request_key, intent.action_fingerprint, intent.canonical_envelope, intent.canonicalization_version, intent.definition_hash, intent.created_at))
+                conn.execute("UPDATE workflows SET current_step = ?, status = ?, updated_at = ? WHERE workflow_id = ?", (step_index, WorkflowStatus.WAITING_EXTERNAL_ACTION.value, utc_now(), intent.workflow_id))
+            else:
+                for field in ("caller_request_key", "action_fingerprint", "canonical_envelope", "canonicalization_version", "definition_hash"):
+                    if existing[field] != getattr(intent, field):
+                        raise ValueError(f"external action intent is immutable: {field}")
+        return self.get_external_action_intent(intent.workflow_id, intent.step_name)
+
+    def get_external_action_intent(self, workflow_id: str, step_name: str) -> ExternalActionIntent | None:
+        with self.connect() as conn:
+            row = conn.execute("SELECT * FROM external_action_intents WHERE workflow_id = ? AND step_name = ?", (workflow_id, step_name)).fetchone()
+        return None if row is None else ExternalActionIntent(**dict(row))
+
+    def mark_external_action_submitted(self, workflow_id: str, step_name: str, action_id: str) -> None:
+        with self.connect() as conn:
+            conn.execute("UPDATE external_action_intents SET action_id = ?, status = 'submitted' WHERE workflow_id = ? AND step_name = ?", (action_id, workflow_id, step_name))
+
+    def set_external_action_definition_hash(self, workflow_id: str, step_name: str, definition_hash: str) -> None:
+        with self.connect() as conn:
+            conn.execute("UPDATE external_action_intents SET definition_hash = ? WHERE workflow_id = ? AND step_name = ?", (definition_hash, workflow_id, step_name))
+
+    def mark_external_action_terminal_read(self, workflow_id: str, step_name: str) -> None:
+        with self.connect() as conn:
+            conn.execute("UPDATE external_action_intents SET status = 'terminal_read' WHERE workflow_id = ? AND step_name = ?", (workflow_id, step_name))
+
+    def _row_to_state(self, row: Any) -> WorkflowState:
         return WorkflowState(
             workflow_id=row["workflow_id"],
             workflow_type=row["workflow_type"],
@@ -331,3 +415,161 @@ class WorkflowStore:
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
+
+
+class PostgresRowWrapper:
+    def __init__(self, row_tuple: tuple[Any, ...], description: list[Any]):
+        self._row_tuple = row_tuple
+        self._col_map = {desc[0]: idx for idx, desc in enumerate(description)}
+
+    def __getitem__(self, key: Any) -> Any:
+        if isinstance(key, int):
+            return self._row_tuple[key]
+        if isinstance(key, str):
+            if key in self._col_map:
+                return self._row_tuple[self._col_map[key]]
+            raise KeyError(key)
+        raise TypeError(f"Index must be int or str, got {type(key)}")
+
+    def keys(self) -> list[str]:
+        return list(self._col_map.keys())
+
+    def __len__(self) -> int:
+        return len(self._row_tuple)
+
+    def __iter__(self) -> Any:
+        return iter(self._row_tuple)
+
+
+class PostgresCursorWrapper:
+    def __init__(self, cursor: Any):
+        self.cursor = cursor
+
+    def fetchone(self) -> PostgresRowWrapper | None:
+        row = self.cursor.fetchone()
+        return PostgresRowWrapper(row, self.cursor.description) if row else None
+
+    def fetchall(self) -> list[PostgresRowWrapper]:
+        rows = self.cursor.fetchall()
+        desc = self.cursor.description
+        return [PostgresRowWrapper(r, desc) for r in rows]
+
+
+class PostgresConnectionWrapper:
+    def __init__(self, pg_conn: Any):
+        self.pg_conn = pg_conn
+
+    def __enter__(self) -> PostgresConnectionWrapper:
+        self.pg_conn.__enter__()
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        try:
+            self.pg_conn.__exit__(exc_type, exc_val, exc_tb)
+        finally:
+            self.pg_conn.close()
+
+    def execute(self, query: str, params: tuple[Any, ...] = ()) -> PostgresCursorWrapper:
+        pg_query = query.replace("?", "%s")
+        cursor = self.pg_conn.cursor()
+        cursor.execute(pg_query, params)
+        return PostgresCursorWrapper(cursor)
+
+    def executescript(self, script: str) -> PostgresCursorWrapper:
+        cursor = self.pg_conn.cursor()
+        cursor.execute(script)
+        return PostgresCursorWrapper(cursor)
+
+
+class PostgresWorkflowStore(WorkflowStore):
+    def __init__(self, dsn: str):
+        self.dsn = dsn
+        self._init_schema()
+
+    def connect(self) -> PostgresConnectionWrapper:
+        try:
+            import psycopg2
+            conn = psycopg2.connect(self.dsn)
+            return PostgresConnectionWrapper(conn)
+        except ImportError:
+            try:
+                import psycopg
+                conn = psycopg.connect(self.dsn)
+                return PostgresConnectionWrapper(conn)
+            except ImportError:
+                raise ImportError(
+                    "PostgreSQL driver (psycopg2 or psycopg) is required for PostgresWorkflowStore. "
+                    "Install it using: pip install psycopg2-binary"
+                )
+
+    def _init_schema(self) -> None:
+        with self.connect() as conn:
+            conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS workflows (
+                    workflow_id     TEXT PRIMARY KEY,
+                    workflow_type   TEXT NOT NULL,
+                    current_step    INTEGER NOT NULL DEFAULT -1,
+                    step_data       TEXT NOT NULL DEFAULT '{}',
+                    status          TEXT NOT NULL DEFAULT 'pending',
+                    created_at      TEXT NOT NULL,
+                    updated_at      TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS step_results (
+                    id              SERIAL PRIMARY KEY,
+                    workflow_id     TEXT NOT NULL,
+                    step_index      INTEGER NOT NULL,
+                    step_name       TEXT NOT NULL,
+                    output          TEXT NOT NULL,
+                    duration_ms     DOUBLE PRECISION NOT NULL,
+                    cost_usd        DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+                    model_used      TEXT,
+                    created_at      TEXT NOT NULL,
+                    FOREIGN KEY (workflow_id) REFERENCES workflows(workflow_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS approval_queue (
+                    gate_id         TEXT PRIMARY KEY,
+                    workflow_id     TEXT NOT NULL,
+                    step_name       TEXT NOT NULL,
+                    payload         TEXT NOT NULL,
+                    status          TEXT NOT NULL DEFAULT 'pending',
+                    requested_at    TEXT NOT NULL,
+                    decided_at      TEXT,
+                    decided_by      TEXT,
+                    rejection_reason TEXT,
+                    definition_hash TEXT,
+                    FOREIGN KEY (workflow_id) REFERENCES workflows(workflow_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS side_effect_log (
+                    idempotency_key TEXT PRIMARY KEY,
+                    workflow_id     TEXT NOT NULL,
+                    step_name       TEXT NOT NULL,
+                    result          TEXT NOT NULL,
+                    executed_at     TEXT NOT NULL,
+                    FOREIGN KEY (workflow_id) REFERENCES workflows(workflow_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS external_action_intents (
+                    workflow_id TEXT NOT NULL,
+                    step_name TEXT NOT NULL,
+                    caller_request_key TEXT NOT NULL,
+                    action_fingerprint TEXT NOT NULL,
+                    canonical_envelope TEXT NOT NULL,
+                    canonicalization_version TEXT NOT NULL,
+                    definition_hash TEXT NOT NULL,
+                    action_id TEXT,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (workflow_id, step_name),
+                    FOREIGN KEY (workflow_id) REFERENCES workflows(workflow_id)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_workflows_status ON workflows(status);
+                CREATE INDEX IF NOT EXISTS idx_approval_status ON approval_queue(status);
+                CREATE INDEX IF NOT EXISTS idx_step_results_workflow ON step_results(workflow_id);
+                ALTER TABLE approval_queue ADD COLUMN IF NOT EXISTS definition_hash TEXT;
+                """
+            )

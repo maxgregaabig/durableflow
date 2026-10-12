@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import sys
 import time
+import hashlib
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, Callable
+from typing import Any, Callable, Protocol, runtime_checkable
 
 from .store import StepResult, WorkflowState, WorkflowStatus, WorkflowStore
 from .telemetry import TelemetryLogger
@@ -16,7 +18,13 @@ class PauseForApproval:
     payload: dict[str, Any]
 
 
-StepFunction = Callable[[WorkflowState, dict[str, Any], dict[str, Any]], StepResult | PauseForApproval]
+@dataclass(frozen=True)
+class WaitForExternalAction:
+    """The step recorded its caller intent and must be re-run only to poll Aegis."""
+    step_name: str
+
+
+StepFunction = Callable[[WorkflowState, dict[str, Any], dict[str, Any]], StepResult | PauseForApproval | WaitForExternalAction]
 
 
 class ApprovalRejectionPolicy(StrEnum):
@@ -28,6 +36,19 @@ class ApprovalRejectionPolicy(StrEnum):
 class WorkflowStep:
     name: str
     fn: StepFunction
+
+
+@runtime_checkable
+class ContextExporter(Protocol):
+    """Generic context-lineage export hook.
+
+    Invoked by the engine after each step's context decisions are linked, and
+    once at workflow completion. The engine depends only on this protocol; the
+    LangSmith implementation is one provider and is never imported here. Export
+    failures MUST be swallowed by the engine so they never affect execution.
+    """
+
+    def export_incremental(self, *, workflow_id: str, step_name: str, context_ledger: Any) -> None: ...
 
 
 class WorkflowEngine:
@@ -67,19 +88,29 @@ class WorkflowEngine:
 
     def execute(self, workflow_id: str) -> WorkflowState:
         state = self.store.load_workflow(workflow_id)
-        if state.status == WorkflowStatus.COMPLETED:
+        if state.status in {WorkflowStatus.COMPLETED, WorkflowStatus.REJECTED, WorkflowStatus.STALE_DEFINITION}:
+            return state
+        if state.status == WorkflowStatus.WAITING_EXTERNAL_ACTION:
             return state
         self.store.update_status(workflow_id, WorkflowStatus.RUNNING)
         return self._run_from_step(workflow_id, state.current_step + 1)
 
     def resume(self, workflow_id: str) -> WorkflowState:
+        """Resume against current registered functions; no general definition pin exists, while configured consequential pauses refuse a changed function identity (D4)."""
         state = self.store.load_workflow(workflow_id)
-        if state.status == WorkflowStatus.COMPLETED:
+        if state.status in {WorkflowStatus.COMPLETED, WorkflowStatus.REJECTED, WorkflowStatus.STALE_DEFINITION}:
             return state
-        if state.status == WorkflowStatus.REJECTED:
-            return state
+        if state.status == WorkflowStatus.WAITING_EXTERNAL_ACTION:
+            if state.current_step < 0 or state.current_step >= len(self._steps) or self.store.get_external_action_intent(state.workflow_id, self._steps[state.current_step][0]) is None:
+                return state
+            if self._definition_is_stale(state):
+                return self.store.update_status(workflow_id, WorkflowStatus.STALE_DEFINITION)
+            self.store.update_status(workflow_id, WorkflowStatus.RUNNING)
+            return self._run_from_step(workflow_id, state.current_step)
         next_index = state.current_step + 1
         if state.status in {WorkflowStatus.PAUSED_APPROVAL, WorkflowStatus.APPROVED}:
+            if state.status == WorkflowStatus.PAUSED_APPROVAL and self._definition_is_stale(state):
+                return self.store.update_status(workflow_id, WorkflowStatus.STALE_DEFINITION)
             next_index = self._resume_index_after_approval(state)
             state = self.store.load_workflow(workflow_id)
             if state.status == WorkflowStatus.REJECTED:
@@ -192,7 +223,13 @@ class WorkflowEngine:
             try:
                 result = fn(state, state.step_data, self.dependencies)
             except Exception:
-                self.store.update_status(workflow_id, WorkflowStatus.FAILED)
+                # Once a consequential request intent exists, an HTTP/refusal
+                # failure must not let a later resume skip its step. Preserve
+                # the wait for explicit recovery or operator inspection.
+                if self.store.get_external_action_intent(workflow_id, name) is not None:
+                    self.store.update_status(workflow_id, WorkflowStatus.WAITING_EXTERNAL_ACTION)
+                else:
+                    self.store.update_status(workflow_id, WorkflowStatus.FAILED)
                 raise
 
             if isinstance(result, PauseForApproval):
@@ -206,8 +243,19 @@ class WorkflowEngine:
                     duration_ms=(time.perf_counter() - started) * 1000,
                 )
                 self.store.save_checkpoint(workflow_id, index, pending_result)
+                if name in self._consequential_approval_steps():
+                    self.store.record_approval_definition_hash(
+                        result.gate_id, self._function_identity_hash(fn)
+                    )
                 self.store.update_status(workflow_id, WorkflowStatus.PAUSED_APPROVAL)
                 self.telemetry.log_approval_request(workflow_id, name, result.gate_id)
+                return self.store.load_workflow(workflow_id)
+
+            if isinstance(result, WaitForExternalAction):
+                # The client has already atomically persisted its request intent
+                # and WAITING status before any HTTP attempt.
+                self.store.set_external_action_definition_hash(workflow_id, name, self._function_identity_hash(fn))
+                self.store.update_status(workflow_id, WorkflowStatus.WAITING_EXTERNAL_ACTION)
                 return self.store.load_workflow(workflow_id)
 
             duration_ms = result.duration_ms or (time.perf_counter() - started) * 1000
@@ -221,6 +269,7 @@ class WorkflowEngine:
                     timestamp=result.timestamp,
                 )
             state = self.store.save_checkpoint(workflow_id, index, result)
+            self._link_context_decisions(workflow_id, name, index)
             self.telemetry.log_step_complete(
                 workflow_id,
                 name,
@@ -231,5 +280,94 @@ class WorkflowEngine:
             index += 1
 
         self.store.update_status(workflow_id, WorkflowStatus.COMPLETED)
+        self._run_context_export_final(workflow_id)
         self.telemetry.log_workflow_complete(workflow_id)
         return self.store.load_workflow(workflow_id)
+
+    def _consequential_approval_steps(self) -> set[str]:
+        configured = self.dependencies.get("consequential_approval_steps", set())
+        return set(configured) if isinstance(configured, (set, frozenset, list, tuple)) else set()
+
+    def _definition_is_stale(self, state: WorkflowState) -> bool:
+        if state.current_step < 0 or state.current_step >= len(self._steps):
+            return False
+        step_name, fn = self._steps[state.current_step]
+        intent = self.store.get_external_action_intent(state.workflow_id, step_name)
+        if intent is not None:
+            return bool(intent.definition_hash and intent.definition_hash != self._function_identity_hash(fn))
+        if step_name not in self._consequential_approval_steps():
+            return False
+        approval = self.dependencies.get("approval_gate")
+        if approval is None:
+            return False
+        request = approval.get_for_workflow(state.workflow_id, step_name)
+        if request is None or not request.definition_hash:
+            return False
+        return request.definition_hash != self._function_identity_hash(fn)
+
+    @staticmethod
+    def _function_identity_hash(fn: StepFunction) -> str:
+        """The deliberately small WS0 D4 guard.
+
+        Digests the registered function's identity (module + qualified name)
+        AND its code, so a redeployment that swaps the implementation under
+        the same name is refused, not silently adopted. Still a single
+        equality check — not general D4 migration.
+        """
+        identity = f"{fn.__module__}:{fn.__qualname__}"
+        try:
+            code = fn.__code__.co_code
+        except AttributeError:  # callables without a plain code object
+            code = b""
+        digest = hashlib.sha256()
+        digest.update(identity.encode("utf-8"))
+        digest.update(b"\x00")
+        digest.update(code)
+        return digest.hexdigest()
+
+    def _run_context_export_final(self, workflow_id: str) -> None:
+        """Final best-effort context export at completion (spec §10.3)."""
+        ledger = self.dependencies.get("context_ledger")
+        exporters = self.dependencies.get("context_exporters") or []
+        if ledger is None or not isinstance(exporters, (list, tuple)):
+            return
+        for exporter in exporters:
+            final = getattr(exporter, "export_final", None)
+            if final is None:
+                continue
+            try:
+                final(workflow_id=workflow_id, context_ledger=ledger)
+            except Exception as exc:  # noqa: BLE001 - exporters must never fail execution
+                print(
+                    f"[engine] context exporter {type(exporter).__name__} final failed: {exc}",
+                    file=sys.stderr,
+                )
+
+    def _link_context_decisions(
+        self,
+        workflow_id: str,
+        step_name: str,
+        step_index: int,
+    ) -> None:
+        ledger = self.dependencies.get("context_ledger")
+        if ledger is None or not hasattr(ledger, "link_decisions_to_step_result"):
+            return
+        ledger.link_decisions_to_step_result(workflow_id, step_name, step_index)
+        # Generic context-export fan-out (spec §10.3). Best-effort: failures are
+        # swallowed and warned, never raised into execution. The engine imports
+        # no LangSmith code; providers live in `dependencies["context_exporters"]`.
+        exporters = self.dependencies.get("context_exporters") or []
+        if not isinstance(exporters, (list, tuple)):
+            return
+        for exporter in exporters:
+            try:
+                exporter.export_incremental(
+                    workflow_id=workflow_id,
+                    step_name=step_name,
+                    context_ledger=ledger,
+                )
+            except Exception as exc:  # noqa: BLE001 - exporters must never fail execution
+                print(
+                    f"[engine] context exporter {type(exporter).__name__} failed: {exc}",
+                    file=sys.stderr,
+                )

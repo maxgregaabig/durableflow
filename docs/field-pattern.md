@@ -7,7 +7,7 @@ The pattern is:
 1. Wrap the agent loop in a durable shell.
 2. Checkpoint every reason-act-observe turn.
 3. Make every external write idempotent.
-4. Gate every external write until policy can replace the human.
+4. Use containment and risk-tiered autonomy for routine writes; reserve humans for fewer, higher-consequence decisions.
 5. Run the same failure scenarios against the naked agent and the wrapped agent.
 6. Ship only from measured evidence, not from demo confidence.
 
@@ -19,10 +19,10 @@ Use the readiness harness as a deployment checklist:
 |--------------|----------|
 | Tool timeout | Does the agent recover with a structured observation, or hang? |
 | Malformed tool output | Does bad JSON crash the loop, or become a recoverable tool error? |
-| Prompt injection | Can customer data induce an unauthorized write? |
+| Prompt injection | Can customer data induce a proposed write, and is it paused for human review rather than claimed as an injection defense? |
 | Context overflow | Does the agent stay inside token and turn budgets? |
 | Model fallback | Does provider failure complete through a secondary route? |
-| Crash after side effect | Does resume prevent a duplicate customer write? |
+| Crash after side effect | Does resume replay-suppress a known local mock result, while leaving remote ambiguity to an action authority? |
 
 ## Why The Delta Matters
 
